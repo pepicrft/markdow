@@ -13,7 +13,7 @@ ingress:
   enabled: true
   className: nginx
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
+    cert-manager.io/cluster-issuer: letsencrypt-cloudflare
     external-dns.alpha.kubernetes.io/hostname: markdow.org
     external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
   tlsSecretName: markdow-org-tls
