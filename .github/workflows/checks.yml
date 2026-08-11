@@ -1,0 +1,80 @@
+name: Markdow
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MIX_ENV: test
+
+jobs:
+  elixir:
+    name: Elixir checks and tests
+    runs-on: hetzner-docker
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: "erlang elixir"
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: mix format --check-formatted --dot-formatter .formatter.standard.exs
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - run: mix test
+
+  chart:
+    name: Deployment chart
+    runs-on: hetzner-docker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: "helm"
+      - run: helm lint deploy/helm/markdow
+      - run: helm lint deploy/helm/markdow --values deploy/values-production.yaml
+      - name: Render production deployment
+        run: |
+          helm template markdow deploy/helm/markdow \
+            --namespace markdow \
+            --values deploy/values-production.yaml > /tmp/markdow.yaml
+          grep -q '^kind: Cluster$' /tmp/markdow.yaml
+          grep -q '^kind: ScheduledBackup$' /tmp/markdow.yaml
+          grep -q '^kind: ExternalSecret$' /tmp/markdow.yaml
+          grep -q '^kind: PersistentVolumeClaim$' /tmp/markdow.yaml
+
+  container:
+    name: Container build
+    runs-on: hetzner-docker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: markdow:check

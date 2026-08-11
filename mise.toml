@@ -1,0 +1,7 @@
+[tools]
+erlang = "29.0.2"
+elixir = "1.20.1-otp-29"
+
+[env]
+MISE_CONFIG_ROOT = "{{config_root}}"
+_.source = ["{{config_root}}/mise/utilities/markdow_dev_instance_env.sh"]

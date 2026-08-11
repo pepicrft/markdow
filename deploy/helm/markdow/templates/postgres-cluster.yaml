@@ -1,0 +1,43 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgres.clusterName }}
+  labels:
+    {{- include "markdow.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.imageName | quote }}
+  inheritedMetadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database | quote }}
+      owner: {{ .Values.postgres.user | quote }}
+      secret:
+        name: {{ .Values.postgres.appSecretName }}
+  storage:
+    storageClass: {{ .Values.postgres.storage.storageClass | quote }}
+    size: {{ .Values.postgres.storage.size | quote }}
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}
+  affinity:
+    enablePodAntiAffinity: false
+    {{- with .Values.postgres.nodeSelector }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.postgres.tolerations }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- if .Values.postgres.backup.enabled }}
+  plugins:
+    - name: {{ .Values.postgres.backup.pluginName | quote }}
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ .Values.postgres.backup.objectStoreName | quote }}
+  {{- end }}
+{{- end }}

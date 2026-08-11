@@ -1,0 +1,57 @@
+{{- if and .Values.postgres.enabled .Values.postgres.backup.enabled }}
+apiVersion: objectstorage.pepicrft.me/v1alpha1
+kind: ObjectBucketClaim
+metadata:
+  name: {{ .Values.postgres.backup.objectStoreName }}
+  labels:
+    {{- include "markdow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-backup
+spec:
+  bucketName: {{ required "postgres.backup.bucketName is required when backups are enabled" .Values.postgres.backup.bucketName | quote }}
+  secretName: {{ .Values.postgres.backup.secretName | quote }}
+  reclaimPolicy: {{ .Values.postgres.backup.reclaimPolicy | quote }}
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ .Values.postgres.backup.objectStoreName }}
+  labels:
+    {{- include "markdow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-backup
+spec:
+  configuration:
+    destinationPath: {{ printf "s3://%s/" .Values.postgres.backup.bucketName | quote }}
+    endpointURL: {{ required "postgres.backup.endpointURL is required when backups are enabled" .Values.postgres.backup.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ .Values.postgres.backup.secretName }}
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: {{ .Values.postgres.backup.secretName }}
+        key: AWS_SECRET_ACCESS_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: {{ .Values.postgres.backup.retentionPolicy | quote }}
+  instanceSidecarConfiguration:
+    resources:
+      {{- toYaml .Values.postgres.backup.sidecarResources | nindent 6 }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ .Values.postgres.clusterName }}-daily
+  labels:
+    {{- include "markdow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-backup
+spec:
+  schedule: {{ .Values.postgres.backup.schedule | quote }}
+  immediate: {{ .Values.postgres.backup.immediate }}
+  backupOwnerReference: self
+  method: plugin
+  pluginConfiguration:
+    name: {{ .Values.postgres.backup.pluginName | quote }}
+  cluster:
+    name: {{ .Values.postgres.clusterName }}
+{{- end }}

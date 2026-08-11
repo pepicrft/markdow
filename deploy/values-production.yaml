@@ -1,0 +1,70 @@
+fullnameOverride: markdow
+
+host: markdow.org
+publicOrigin: https://markdow.org
+
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+analytics:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    external-dns.alpha.kubernetes.io/hostname: markdow.org
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+  tlsSecretName: markdow-org-tls
+
+extraEnv:
+  MARKDOW_ALLOWED_MCP_ORIGINS: https://markdow.org
+  MARKDOW_DATA_DIR: /app/data
+  MARKDOW_EMAIL_FROM_ADDRESS: markdow@pepicrft.me
+  MARKDOW_EMAIL_FROM_NAME: Markdow
+  MARKDOW_MARKETING_ROUTES: "true"
+  MARKDOW_SMTP_PORT: "587"
+  MARKDOW_SMTP_RELAY: smtp-relay.pepicrft.me
+  MARKDOW_STORAGE_DRIVER: local
+  MARKDOW_STORAGE_PATH: /app/data/vault
+
+documents:
+  persistence:
+    enabled: true
+    storageClass: hcloud-volumes
+    size: 20Gi
+
+nodeSelector:
+  node.cluster.x-k8s.io/pool: app
+
+postgres:
+  storage:
+    storageClass: hcloud-volumes
+    size: 20Gi
+  nodeSelector:
+    node.cluster.x-k8s.io/pool: stateful
+  tolerations:
+    - key: node.cluster.x-k8s.io/pool
+      operator: Equal
+      value: stateful
+      effect: NoSchedule
+  backup:
+    enabled: true
+    endpointURL: https://fsn1.your-objectstorage.com
+    bucketName: pepicrft-markdow-postgres-backups
+
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    kind: ClusterSecretStore
+    # Legacy store alias for the Pepicrft cluster, not a Salibu-owned cluster.
+    name: salibu-production
+  appEnv:
+    itemKey: markdow
+  postgres:
+    itemKey: markdow
+    passwordField: POSTGRES_PASSWORD
+  imagePullSecret:
+    enabled: true
+    itemKey: kubernetes

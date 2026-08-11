@@ -1,0 +1,9 @@
+apiVersion: v2
+name: markdow
+description: Headless Markdown vault service
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://markdow.org
+sources:
+  - https://github.com/pepicrft/markdow

@@ -1,0 +1,18 @@
+{{- if .Values.documents.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "markdow.fullname" . }}-documents
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "markdow.labels" . | nindent 4 }}
+    app.kubernetes.io/component: documents
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.documents.persistence.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.documents.persistence.size | quote }}
+{{- end }}

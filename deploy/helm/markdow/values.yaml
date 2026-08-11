@@ -1,0 +1,135 @@
+fullnameOverride: ""
+replicaCount: 1
+
+strategy:
+  type: Recreate
+
+image:
+  repository: ghcr.io/pepicrft/markdow
+  tag: main
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+host: markdow.example.com
+publicOrigin: https://markdow.example.com
+
+service:
+  port: 80
+  targetPort: 4000
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  tlsSecretName: markdow-tls
+
+secrets:
+  envSecretName: markdow-app-env
+
+analytics:
+  enabled: false
+  secretName: analytics-client
+
+extraEnv:
+  MARKDOW_ALLOWED_MCP_ORIGINS: https://markdow.example.com
+  MARKDOW_DATA_DIR: /app/data
+  MARKDOW_EMAIL_FROM_ADDRESS: markdow@pepicrft.me
+  MARKDOW_EMAIL_FROM_NAME: Markdow
+  MARKDOW_MARKETING_ROUTES: "true"
+  MARKDOW_SMTP_PORT: "587"
+  MARKDOW_SMTP_RELAY: smtp-relay.pepicrft.me
+  MARKDOW_STORAGE_DRIVER: local
+  MARKDOW_STORAGE_PATH: /app/data/vault
+
+documents:
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 20Gi
+
+postgres:
+  enabled: true
+  clusterName: markdow-postgres
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.3-standard-trixie
+  waitImage: postgres:18-alpine
+  certificateAuthoritySecretName: ""
+  user: markdow
+  database: markdow_prod
+  host: ""
+  appSecretName: markdow-postgres-app
+  instances: 1
+  storage:
+    storageClass: ""
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  backup:
+    enabled: false
+    pluginName: barman-cloud.cloudnative-pg.io
+    objectStoreName: markdow-postgres-backups
+    endpointURL: ""
+    bucketName: ""
+    secretName: markdow-postgres-backups
+    retentionPolicy: 30d
+    schedule: "0 15 4 * * *"
+    immediate: true
+    reclaimPolicy: Retain
+    sidecarResources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+
+externalSecrets:
+  enabled: false
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: default
+  appEnv:
+    itemKey: markdow
+    fields:
+      MARKDOW_SECRET_KEY_BASE: SECRET_KEY_BASE
+      MARKDOW_API_KEY: API_KEY
+      MARKDOW_AGENT_AUTH_PRIVATE_KEY_PEM: AGENT_AUTH_PRIVATE_KEY_PEM
+      MARKDOW_EMBEDDING_SECRET_KEY: EMBEDDING_SECRET_KEY
+      MARKDOW_LEGAL_OPERATOR_NAME: LEGAL_OPERATOR_NAME
+      MARKDOW_LEGAL_OPERATOR_ADDRESS: LEGAL_OPERATOR_ADDRESS
+      MARKDOW_LEGAL_CONTACT_EMAIL: LEGAL_CONTACT_EMAIL
+  postgres:
+    itemKey: markdow
+    passwordField: POSTGRES_PASSWORD
+  imagePullSecret:
+    enabled: false
+    name: ghcr-pull-secret
+    registry: ghcr.io
+    itemKey: kubernetes
+    usernameField: GHCR_PULL_USERNAME
+    passwordField: GHCR_PULL_TOKEN
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 768Mi
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

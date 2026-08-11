@@ -1,0 +1,7 @@
+/_build/
+/cover/
+/deps/
+/.git/
+/.github/
+/tmp/
+erl_crash.dump

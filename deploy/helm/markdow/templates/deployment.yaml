@@ -1,0 +1,165 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "markdow.fullname" . }}
+  annotations:
+    hermes.pepicrft.com/elixir-container: web
+    hermes.pepicrft.com/elixir-release: markdow
+  labels:
+    {{- include "markdow.labels" . | nindent 4 }}
+    hermes.pepicrft.com/production-elixir-console: enabled
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "markdow.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "markdow.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-database
+          image: {{ .Values.postgres.waitImage | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - until pg_isready --host={{ include "markdow.postgresHost" . | quote }} --port=5432 --username={{ .Values.postgres.user | quote }}; do sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+        - name: migrate
+          image: {{ include "markdow.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/bin/markdow", "eval", "Markdow.Release.migrate"]
+          env:
+            - name: MARKDOW_DATABASE_CERTIFICATE_AUTHORITY_FILE
+              value: /etc/database-certificate-authority/ca.crt
+            - name: MARKDOW_HOST
+              value: {{ .Values.host | quote }}
+            - name: MARKDOW_SCHEME
+              value: https
+            {{- range $key, $value := .Values.extraEnv }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.envSecretName }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+          volumeMounts:
+            - name: database-certificate-authority
+              mountPath: /etc/database-certificate-authority
+              readOnly: true
+      containers:
+        - name: web
+          image: {{ include "markdow.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: ERL_CRASH_DUMP
+              value: /tmp/erl_crash.dump
+            - name: MARKDOW_DATABASE_CERTIFICATE_AUTHORITY_FILE
+              value: /etc/database-certificate-authority/ca.crt
+            - name: MARKDOW_HOST
+              value: {{ .Values.host | quote }}
+            - name: MARKDOW_SCHEME
+              value: https
+            - name: MARKDOW_SERVER
+              value: "true"
+            {{- range $key, $value := .Values.extraEnv }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secrets.envSecretName }}
+            {{- if .Values.analytics.enabled }}
+            - secretRef:
+                name: {{ required "analytics.secretName is required when analytics is enabled" .Values.analytics.secretName }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 8
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+          volumeMounts:
+            - name: documents
+              mountPath: /app/data
+            - name: temporary-files
+              mountPath: /tmp
+            - name: database-certificate-authority
+              mountPath: /etc/database-certificate-authority
+              readOnly: true
+      volumes:
+        - name: documents
+          persistentVolumeClaim:
+            claimName: {{ include "markdow.fullname" . }}-documents
+        - name: temporary-files
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: database-certificate-authority
+          secret:
+            secretName: {{ default (printf "%s-ca" .Values.postgres.clusterName) .Values.postgres.certificateAuthoritySecretName }}
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
