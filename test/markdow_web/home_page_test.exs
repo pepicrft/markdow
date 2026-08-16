@@ -26,6 +26,8 @@ defmodule MarkdowWeb.HomePageTest do
     assert response.resp_body =~ "Sign me up for Markdow using https://markdow.org/auth.md."
     assert response.resp_body =~ ~s(data-copy-target="agent-signup-prompt")
     assert response.resp_body =~ ~s(aria-label="Copy the agent sign-up prompt")
+    assert response.resp_body =~ "Markdow is small enough to change."
+    assert response.resp_body =~ ~s(href="https://github.com/pepicrft/markdow/issues")
     assert response.resp_body =~ "Prefer to host Markdow yourself? Go for it."
     refute response.resp_body =~ "The first version"
 

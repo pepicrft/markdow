@@ -358,7 +358,7 @@ defmodule MarkdowWeb.HomePage do
       <div id="home">
         <header data-part="masthead">
           <a data-part="identity" href="/"><strong>markdow</strong><span>Programmatic access to Markdown notes</span></a>
-          <nav data-part="navigation" aria-label="Primary navigation"><a href="#about">About</a><a href="#works">How it works</a><a href="#agent-access">Agent access</a><a href="/docs" data-analytics-event="documentation_opened">Documentation</a></nav>
+          <nav data-part="navigation" aria-label="Primary navigation"><a href="#about">About</a><a href="#works">How it works</a><a href="#agent-access">Agent access</a><a href="#contributing">Contributing</a><a href="/docs" data-analytics-event="documentation_opened">Documentation</a></nav>
         </header>
 
         <main data-part="body">
@@ -443,6 +443,16 @@ defmodule MarkdowWeb.HomePage do
                     <span data-part="status" data-copy-status role="status" aria-live="polite"></span>
                   </div>
                 </div>
+              </div>
+            </section>
+            <section data-part="section" id="contributing" aria-labelledby="contributing-title">
+              <p data-part="label"><span>Contributing</span>Code and design</p>
+              <div data-part="prose">
+                <h2 id="contributing-title">Markdow is small enough to change.</h2>
+                <p data-part="lead">An Elixir service, a PostgreSQL index, and a folder of Markdown files. There is little machinery between an idea and a working patch.</p>
+                <p>Code is welcome. A storage driver, a note operation, better indexing, or a client for the editor you already use. When an operation changes, its web route, its <a href="/openapi.json">OpenAPI description</a>, and its <a href="https://modelcontextprotocol.io/" title="Model Context Protocol">Model Context Protocol</a> tool are updated and tested together, so a contribution stays consistent across every interface.</p>
+                <p>Design is welcome on the same terms. These pages, the documentation, and the social preview images read from one set of design tokens, so a considered change to the palette, the type scale, or a layout reaches all of them at once. A proposal is as useful as a patch.</p>
+                <aside data-part="callout"><strong>Where to start.</strong> Read the <a href="https://github.com/pepicrft/markdow" data-analytics-event="source_opened">source</a>, open or claim an <a href="https://github.com/pepicrft/markdow/issues" data-analytics-event="issues_opened">issue</a>, and describe what you plan to change before writing much of it.</aside>
               </div>
             </section>
           </article>
