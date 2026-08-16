@@ -13,6 +13,7 @@ defmodule MarkdowWeb.HomePage do
       <meta property="og:description" content="Keep the files you have. Use them from more places.">
       <meta property="og:type" content="website">
       <meta property="og:url" content="https://markdow.org/">
+      <!-- markdow-og-image -->
       <!-- markdow-analytics -->
       <script defer src="/assets/home.js"></script>
       <title>Markdow — Programmatic access to Markdown notes</title>
@@ -463,9 +464,31 @@ defmodule MarkdowWeb.HomePage do
 
   @document MarkdowWeb.Theme.inject(@page)
 
+  @doc """
+  Renders the page.
+
+  Options:
+
+    * `:analytics` - the endpoint's analytics configuration
+    * `:base_url` - the externally visible origin, needed to advertise the
+      social card; omitting it renders the page without one
+    * `:open_graph` - the social card configuration
+  """
   @spec html(keyword()) :: String.t()
-  def html(analytics \\ []) do
-    String.replace(@document, "<!-- markdow-analytics -->", analytics_markup(analytics))
+  def html(opts \\ []) do
+    @document
+    |> String.replace("<!-- markdow-analytics -->", analytics_markup(opts[:analytics] || []))
+    |> String.replace("<!-- markdow-og-image -->", social_markup(opts))
+  end
+
+  defp social_markup(opts) do
+    case Keyword.get(opts, :base_url) do
+      base_url when is_binary(base_url) and base_url != "" ->
+        MarkdowWeb.OpenGraph.meta_tags(:home, base_url, Keyword.get(opts, :open_graph, []))
+
+      _missing ->
+        ""
+    end
   end
 
   defp analytics_markup(analytics) do

@@ -1,12 +1,42 @@
 defmodule MarkdowWeb.LegalPage do
   @moduledoc false
 
-  @spec terms(keyword()) :: String.t()
-  def terms(legal) do
+  @documents %{
+    terms: %{
+      title: "Terms of service",
+      introduction: "The simple terms for using the free Markdow service.",
+      path: "/terms"
+    },
+    privacy: %{
+      title: "Privacy policy",
+      introduction: "What a hosted Markdow instance processes and why.",
+      path: "/privacy"
+    },
+    cookies: %{
+      title: "Cookie terms",
+      introduction: "How Markdow uses browser storage and anonymous audience measurement.",
+      path: "/cookies"
+    }
+  }
+
+  @typedoc "A legal document Markdow publishes."
+  @type document :: :terms | :privacy | :cookies
+
+  @doc """
+  The title, summary, and path of a legal document.
+
+  The social card renders from the same values as the page, so a wording change
+  reaches both.
+  """
+  @spec metadata(document()) :: %{title: String.t(), introduction: String.t(), path: String.t()}
+  def metadata(document), do: Map.fetch!(@documents, document)
+
+  @spec terms(keyword(), keyword()) :: String.t()
+  def terms(legal, opts \\ []) do
     page(
-      "Terms of service",
-      "The simple terms for using the free Markdow service.",
+      :terms,
       legal,
+      opts,
       """
       <section>
         <h2>1. The service</h2>
@@ -51,12 +81,12 @@ defmodule MarkdowWeb.LegalPage do
     )
   end
 
-  @spec privacy(keyword()) :: String.t()
-  def privacy(legal) do
+  @spec privacy(keyword(), keyword()) :: String.t()
+  def privacy(legal, opts \\ []) do
     page(
-      "Privacy policy",
-      "What a hosted Markdow instance processes and why.",
+      :privacy,
       legal,
+      opts,
       """
       <section>
         <h2>1. Controller</h2>
@@ -99,12 +129,12 @@ defmodule MarkdowWeb.LegalPage do
     )
   end
 
-  @spec cookies(keyword()) :: String.t()
-  def cookies(legal) do
+  @spec cookies(keyword(), keyword()) :: String.t()
+  def cookies(legal, opts \\ []) do
     page(
-      "Cookie terms",
-      "How Markdow uses browser storage and anonymous audience measurement.",
+      :cookies,
       legal,
+      opts,
       """
       <section>
         <h2>No advertising or analytics cookies</h2>
@@ -126,7 +156,9 @@ defmodule MarkdowWeb.LegalPage do
     )
   end
 
-  defp page(title, introduction, legal, content) do
+  defp page(document, legal, opts, content) do
+    %{title: title, introduction: introduction} = metadata(document)
+
     MarkdowWeb.Theme.inject("""
     <!doctype html>
     <html lang="en">
@@ -134,6 +166,7 @@ defmodule MarkdowWeb.LegalPage do
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="description" content="#{escape(introduction)}">
+        #{social_markup(document, opts)}
         <title>#{escape(title)} · Markdow</title>
         <style>
           /* markdow-theme */
@@ -235,6 +268,26 @@ defmodule MarkdowWeb.LegalPage do
       </body>
     </html>
     """)
+  end
+
+  # Social metadata needs the externally visible origin, which only the request
+  # knows, so a caller that does not supply one renders the page without it.
+  defp social_markup(document, opts) do
+    case Keyword.get(opts, :base_url) do
+      base_url when is_binary(base_url) and base_url != "" ->
+        %{title: title, introduction: introduction, path: path} = metadata(document)
+
+        """
+        <meta property="og:title" content="#{escape(title)} · Markdow">
+        <meta property="og:description" content="#{escape(introduction)}">
+        <meta property="og:type" content="article">
+        <meta property="og:url" content="#{escape(base_url <> path)}">
+        #{MarkdowWeb.OpenGraph.meta_tags(document, base_url, Keyword.get(opts, :open_graph, []))}\
+        """
+
+      _missing ->
+        ""
+    end
   end
 
   defp provider_details(legal) do

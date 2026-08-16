@@ -28,6 +28,7 @@ defmodule MarkdowWeb.OpenApiTest do
       "terms_of_service",
       "privacy_policy",
       "cookie_terms",
+      "open_graph_image",
       "agent_auth_instructions",
       "register_agent_identity",
       "start_agent_claim",

@@ -9,6 +9,8 @@ defmodule Markdow.Application do
 
     storage_config = Application.fetch_env!(:markdow, :storage)
 
+    # Warms the headless-browser pool that renders Open Graph images. Empty
+    # when no pool is configured, which is the case in tests.
     children =
       [
         MarkdowWeb.Telemetry,
@@ -16,6 +18,7 @@ defmodule Markdow.Application do
         storage_child(storage_config)
       ] ++
         agent_auth_sweeper_child() ++
+        BrowseChrome.children() ++
         [
           Markdow.RateLimit,
           {Finch, name: Markdow.Finch},

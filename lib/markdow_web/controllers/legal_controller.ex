@@ -25,9 +25,16 @@ defmodule MarkdowWeb.LegalController do
     summary: "Read the cookie terms",
     responses: [ok: {"Cookie terms", "text/html", %Schema{type: :string}}]
 
-  def terms(conn, _params), do: send_page(conn, LegalPage.terms(legal(conn)))
-  def privacy(conn, _params), do: send_page(conn, LegalPage.privacy(legal(conn)))
-  def cookies(conn, _params), do: send_page(conn, LegalPage.cookies(legal(conn)))
+  def terms(conn, _params), do: send_page(conn, LegalPage.terms(legal(conn), page_opts(conn)))
+  def privacy(conn, _params), do: send_page(conn, LegalPage.privacy(legal(conn), page_opts(conn)))
+  def cookies(conn, _params), do: send_page(conn, LegalPage.cookies(legal(conn), page_opts(conn)))
+
+  defp page_opts(conn) do
+    [
+      base_url: MarkdowWeb.PublicOrigin.from_conn(conn),
+      open_graph: MarkdowWeb.OpenGraph.configuration(conn)
+    ]
+  end
 
   defp send_page(conn, page) do
     conn

@@ -94,6 +94,27 @@ end
 # does not want the marketing pages, sets the pool size to zero: no browser is
 # started, the pages omit the image tags, and the endpoint reports the feature
 # as unavailable.
+if config_env() != :test do
+  open_graph_pool_size =
+    "MARKDOW_OG_BROWSER_POOL_SIZE"
+    |> System.get_env("2")
+    |> String.to_integer()
+
+  open_graph_cache_dir =
+    System.get_env("MARKDOW_OG_CACHE_DIR", Path.join(Path.expand(data_dir), "og"))
+
+  if open_graph_pool_size > 0 do
+    config :browse_chrome,
+      default_pool: MarkdowWeb.OpenGraph.BrowserPool,
+      pools: [{MarkdowWeb.OpenGraph.BrowserPool, [pool_size: open_graph_pool_size]}]
+
+    config :markdow, open_graph: [enabled: true, cache_dir: open_graph_cache_dir]
+  else
+    config :browse_chrome, pools: []
+    config :markdow, open_graph: [enabled: false, cache_dir: open_graph_cache_dir]
+  end
+end
+
 agent_auth_private_key =
   case {config_env(), System.get_env("MARKDOW_AGENT_AUTH_PRIVATE_KEY_PEM")} do
     {:prod, nil} ->

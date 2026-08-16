@@ -32,16 +32,25 @@ analytics:
   enabled: false
   secretName: analytics-client
 
+# MARKDOW_OG_BROWSER_POOL_SIZE sizes the headless browser pool that renders the
+# Open Graph cards. Set it to "0" on an instance that should not run a browser:
+# the marketing pages then omit their social image tags.
 extraEnv:
   MARKDOW_ALLOWED_MCP_ORIGINS: https://markdow.example.com
   MARKDOW_DATA_DIR: /app/data
   MARKDOW_EMAIL_FROM_ADDRESS: markdow@pepicrft.me
   MARKDOW_EMAIL_FROM_NAME: Markdow
   MARKDOW_MARKETING_ROUTES: "true"
+  MARKDOW_OG_BROWSER_POOL_SIZE: "2"
   MARKDOW_SMTP_PORT: "587"
   MARKDOW_SMTP_RELAY: smtp-relay.pepicrft.me
   MARKDOW_STORAGE_DRIVER: local
   MARKDOW_STORAGE_PATH: /app/data/vault
+
+# Chromium keeps each pooled browser profile and its shared files under /tmp.
+# Keep the volume bounded while leaving room for the configured workers.
+temporaryFiles:
+  sizeLimit: 512Mi
 
 documents:
   persistence:
@@ -118,13 +127,15 @@ externalSecrets:
     usernameField: GHCR_PULL_USERNAME
     passwordField: GHCR_PULL_TOKEN
 
+# The limits leave room for the pooled Chromium processes that render the
+# Open Graph cards alongside the release.
 resources:
   requests:
-    cpu: 100m
-    memory: 256Mi
+    cpu: 150m
+    memory: 512Mi
   limits:
     cpu: "1"
-    memory: 768Mi
+    memory: 2Gi
 
 pdb:
   enabled: true

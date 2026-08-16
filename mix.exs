@@ -41,6 +41,8 @@ defmodule Markdow.MixProject do
     [
       {:bandit, "~> 1.12"},
       {:argon2_elixir, "~> 4.0"},
+      {:browse_chrome, "~> 0.2"},
+      {:carta, "~> 0.2"},
       {:ecto_sql, "~> 3.14"},
       {:finch, "~> 0.23"},
       {:hammer, "~> 7.4"},
