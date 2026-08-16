@@ -22,10 +22,24 @@ defmodule MarkdowWeb.HomePageTest do
     assert response.resp_body =~ "The file is the durable part."
     assert response.resp_body =~ "There is very little machinery."
     assert response.resp_body =~ "Work with notes from any client."
-    assert response.resp_body =~ "Copy this into your agent."
+    assert response.resp_body =~ "Copy the right one into your agent."
+    assert response.resp_body =~ "New to Markdow"
     assert response.resp_body =~ "Sign me up for Markdow using https://markdow.org/auth.md."
+
+    assert response.resp_body =~
+             "create my first vault through its Model Context Protocol server."
+
     assert response.resp_body =~ ~s(data-copy-target="agent-signup-prompt")
     assert response.resp_body =~ ~s(aria-label="Copy the agent sign-up prompt")
+    assert response.resp_body =~ "Already use Markdow"
+
+    assert response.resp_body =~
+             "Connect me to my existing Markdow account using https://markdow.org/auth.md."
+
+    assert response.resp_body =~ "list my vaults through its Model Context Protocol server."
+
+    assert response.resp_body =~ ~s(data-copy-target="agent-connect-prompt")
+    assert response.resp_body =~ ~s(aria-label="Copy the existing account prompt")
     assert response.resp_body =~ "Markdow is small enough to change."
     assert response.resp_body =~ ~s(href="https://github.com/pepicrft/markdow/issues")
     assert response.resp_body =~ "Prefer to host Markdow yourself? Go for it."
@@ -74,6 +88,7 @@ defmodule MarkdowWeb.HomePageTest do
     assert script.status == 200
     assert script.resp_body =~ "navigator.clipboard?.writeText"
     assert script.resp_body =~ "document.execCommand"
+    assert script.resp_body =~ ~s|document.querySelectorAll("[data-copy-target]")|
     assert script.resp_body =~ ~s(button.textContent = "Copied")
   end
 

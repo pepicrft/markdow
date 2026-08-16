@@ -260,7 +260,16 @@ defmodule MarkdowWeb.HomePage do
             & strong { font-family: var(--sans); font-size: var(--text-label); }
           }
 
-          & [data-part="commands"] { margin-top: var(--space-7); }
+          & [data-part="commands"] {
+            display: grid;
+            gap: var(--space-7);
+            margin-top: var(--space-7);
+
+            & > [data-part="command"] > h3 {
+              margin: 0 0 var(--space-3);
+              font: var(--weight-semibold) var(--text-label)/var(--leading-snug) var(--sans);
+            }
+          }
 
           & [data-part="closing"] {
             display: grid;
@@ -432,15 +441,27 @@ defmodule MarkdowWeb.HomePage do
             </section>
 
             <section data-part="section" id="agent-access" aria-labelledby="agent-access-title">
-              <p data-part="label"><span>Get started</span>One prompt</p>
+              <p data-part="label"><span>Get started</span>Choose your prompt</p>
               <div data-part="prose">
-                <h2 id="agent-access-title">Copy this into your agent.</h2>
+                <h2 id="agent-access-title">Copy the right one into your agent.</h2>
                 <div data-part="commands">
-                  <div data-part="copy-prompt">
-                    <pre id="agent-signup-prompt">Sign me up for Markdow using https://markdow.org/auth.md.
-  Ask me for anything you need, then create my first vault.</pre>
-                    <button data-part="copy-button" type="button" data-copy-target="agent-signup-prompt" data-analytics-event="agent_prompt_copied" aria-label="Copy the agent sign-up prompt">Copy</button>
-                    <span data-part="status" data-copy-status role="status" aria-live="polite"></span>
+                  <div data-part="command">
+                    <h3>New to Markdow</h3>
+                    <div data-part="copy-prompt">
+                      <pre id="agent-signup-prompt">Sign me up for Markdow using https://markdow.org/auth.md.
+  Ask me for anything you need, then create my first vault through its Model Context Protocol server.</pre>
+                      <button data-part="copy-button" type="button" data-copy-target="agent-signup-prompt" data-copy-success="Agent sign-up prompt copied to the clipboard." data-analytics-event="agent_prompt_copied" aria-label="Copy the agent sign-up prompt">Copy</button>
+                      <span data-part="status" data-copy-status role="status" aria-live="polite"></span>
+                    </div>
+                  </div>
+                  <div data-part="command">
+                    <h3>Already use Markdow</h3>
+                    <div data-part="copy-prompt">
+                      <pre id="agent-connect-prompt">Connect me to my existing Markdow account using https://markdow.org/auth.md.
+  Ask me for anything you need, then list my vaults through its Model Context Protocol server.</pre>
+                      <button data-part="copy-button" type="button" data-copy-target="agent-connect-prompt" data-copy-success="Existing account prompt copied to the clipboard." data-analytics-event="agent_existing_prompt_copied" aria-label="Copy the existing account prompt">Copy</button>
+                      <span data-part="status" data-copy-status role="status" aria-live="polite"></span>
+                    </div>
                   </div>
                 </div>
               </div>
