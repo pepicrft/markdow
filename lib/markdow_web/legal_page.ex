@@ -1,12 +1,42 @@
 defmodule MarkdowWeb.LegalPage do
   @moduledoc false
 
-  @spec terms(keyword()) :: String.t()
-  def terms(legal) do
+  @documents %{
+    terms: %{
+      title: "Terms of service",
+      introduction: "The simple terms for using the free Markdow service.",
+      path: "/terms"
+    },
+    privacy: %{
+      title: "Privacy policy",
+      introduction: "What a hosted Markdow instance processes and why.",
+      path: "/privacy"
+    },
+    cookies: %{
+      title: "Cookie terms",
+      introduction: "How Markdow uses browser storage and anonymous audience measurement.",
+      path: "/cookies"
+    }
+  }
+
+  @typedoc "A legal document Markdow publishes."
+  @type document :: :terms | :privacy | :cookies
+
+  @doc """
+  The title, summary, and path of a legal document.
+
+  The social card renders from the same values as the page, so a wording change
+  reaches both.
+  """
+  @spec metadata(document()) :: %{title: String.t(), introduction: String.t(), path: String.t()}
+  def metadata(document), do: Map.fetch!(@documents, document)
+
+  @spec terms(keyword(), keyword()) :: String.t()
+  def terms(legal, opts \\ []) do
     page(
-      "Terms of service",
-      "The simple terms for using the free Markdow service.",
+      :terms,
       legal,
+      opts,
       """
       <section>
         <h2>1. The service</h2>
@@ -51,12 +81,12 @@ defmodule MarkdowWeb.LegalPage do
     )
   end
 
-  @spec privacy(keyword()) :: String.t()
-  def privacy(legal) do
+  @spec privacy(keyword(), keyword()) :: String.t()
+  def privacy(legal, opts \\ []) do
     page(
-      "Privacy policy",
-      "What a hosted Markdow instance processes and why.",
+      :privacy,
       legal,
+      opts,
       """
       <section>
         <h2>1. Controller</h2>
@@ -99,12 +129,12 @@ defmodule MarkdowWeb.LegalPage do
     )
   end
 
-  @spec cookies(keyword()) :: String.t()
-  def cookies(legal) do
+  @spec cookies(keyword(), keyword()) :: String.t()
+  def cookies(legal, opts \\ []) do
     page(
-      "Cookie terms",
-      "How Markdow uses browser storage and anonymous audience measurement.",
+      :cookies,
       legal,
+      opts,
       """
       <section>
         <h2>No advertising or analytics cookies</h2>
@@ -126,48 +156,138 @@ defmodule MarkdowWeb.LegalPage do
     )
   end
 
-  defp page(title, introduction, legal, content) do
-    """
+  defp page(document, legal, opts, content) do
+    %{title: title, introduction: introduction} = metadata(document)
+
+    MarkdowWeb.Theme.inject("""
     <!doctype html>
     <html lang="en">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="description" content="#{escape(introduction)}">
+        #{social_markup(document, opts)}
         <title>#{escape(title)} · Markdow</title>
         <style>
-          :root { color-scheme: light; --paper: #f8f7f2; --ink: #24231f; --muted: #6e6b62; --rule: #cfccc2; --accent: #285d4b; }
+          /* markdow-theme */
+
           * { box-sizing: border-box; }
-          body { margin: 0; background: var(--paper); color: var(--ink); font: 18px/1.6 Charter, "Bitstream Charter", Georgia, serif; }
+          body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--serif); font-size: var(--text-root); line-height: var(--leading-normal); }
           a { color: var(--accent); text-underline-offset: 3px; }
-          header, main, footer { width: min(780px, calc(100% - 40px)); margin: 0 auto; }
-          header { display: flex; justify-content: space-between; gap: 24px; padding: 26px 0 22px; border-bottom: 1px solid var(--ink); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-          header a { color: var(--ink); text-decoration: none; }
-          nav { display: flex; flex-wrap: wrap; gap: 16px; }
-          main { padding: 76px 0 90px; }
-          h1, h2 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: -.035em; line-height: 1.12; }
-          h1 { margin: 0 0 18px; font-size: clamp(42px, 8vw, 68px); }
-          h2 { margin: 0 0 14px; font-size: 25px; }
-          .introduction { margin: 0 0 56px; color: var(--muted); font-size: 22px; }
-          section { padding: 32px 0; border-top: 1px solid var(--rule); }
-          section p, section ul { margin: 0 0 16px; }
-          section p:last-child, section ul:last-child { margin-bottom: 0; }
-          address { font-style: normal; }
-          footer { display: flex; justify-content: space-between; gap: 24px; padding: 23px 0 34px; border-top: 1px solid var(--rule); color: var(--muted); font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-          @media (max-width: 620px) { header, footer { display: block; } nav { margin-top: 12px; } main { padding-top: 56px; } }
+
+          #legal {
+            --page-width: 780px;
+            --page-gutter: 40px;
+
+            margin: 0 auto;
+            width: min(var(--page-width), calc(100% - var(--page-gutter)));
+
+            & > [data-part="masthead"] {
+              display: flex;
+              justify-content: space-between;
+              gap: var(--space-6);
+              padding: var(--space-6) 0;
+              border-bottom: var(--rule-width) solid var(--ink);
+              font: var(--text-small)/var(--leading-snug) var(--sans);
+
+              & a { color: var(--ink); text-decoration: none; }
+              & > nav { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+
+              @media (max-width: 620px) {
+                & { display: block; }
+                & > nav { margin-top: var(--space-3); }
+              }
+            }
+
+            & > [data-part="body"] {
+              padding: var(--space-11) 0 var(--space-12);
+
+              @media (max-width: 620px) {
+                & { padding-top: var(--space-10); }
+              }
+
+              & h1 {
+                margin: 0 0 var(--space-5);
+                font-family: var(--sans);
+                font-size: var(--text-title);
+                letter-spacing: var(--tracking-heading);
+                line-height: var(--leading-tight);
+              }
+
+              & h2 {
+                margin: 0 0 var(--space-4);
+                font-family: var(--sans);
+                font-size: var(--text-subheading);
+                letter-spacing: var(--tracking-heading);
+                line-height: var(--leading-tight);
+              }
+
+              & > [data-part="introduction"] {
+                margin: 0 0 var(--space-10);
+                color: var(--muted);
+                font-size: var(--text-lead);
+              }
+
+              & section {
+                padding: var(--space-7) 0;
+                border-top: var(--rule-width) solid var(--rule);
+
+                & p, & ul { margin: 0 0 var(--space-4); }
+                & p:last-child, & ul:last-child { margin-bottom: 0; }
+              }
+
+              & address { font-style: normal; }
+            }
+
+            & > [data-part="colophon"] {
+              display: flex;
+              justify-content: space-between;
+              gap: var(--space-6);
+              padding: var(--space-6) 0 var(--space-7);
+              border-top: var(--rule-width) solid var(--rule);
+              color: var(--muted);
+              font: var(--text-mini)/var(--leading-normal) var(--sans);
+
+              @media (max-width: 620px) {
+                & { display: block; }
+              }
+            }
+          }
         </style>
       </head>
       <body>
-        <header><a href="/"><strong>markdow</strong></a><nav><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/cookies">Cookies</a></nav></header>
-        <main>
-          <h1>#{escape(title)}</h1>
-          <p class="introduction">#{escape(introduction)}</p>
-          #{content}
-        </main>
-        <footer><span>Effective #{escape(Keyword.fetch!(legal, :effective_date))}</span><a href="/">Return to Markdow</a></footer>
+        <div id="legal">
+          <header data-part="masthead"><a href="/"><strong>markdow</strong></a><nav><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/cookies">Cookies</a></nav></header>
+          <main data-part="body">
+            <h1>#{escape(title)}</h1>
+            <p data-part="introduction">#{escape(introduction)}</p>
+            #{content}
+          </main>
+          <footer data-part="colophon"><span>Effective #{escape(Keyword.fetch!(legal, :effective_date))}</span><a href="/">Return to Markdow</a></footer>
+        </div>
       </body>
     </html>
-    """
+    """)
+  end
+
+  # Social metadata needs the externally visible origin, which only the request
+  # knows, so a caller that does not supply one renders the page without it.
+  defp social_markup(document, opts) do
+    case Keyword.get(opts, :base_url) do
+      base_url when is_binary(base_url) and base_url != "" ->
+        %{title: title, introduction: introduction, path: path} = metadata(document)
+
+        """
+        <meta property="og:title" content="#{escape(title)} · Markdow">
+        <meta property="og:description" content="#{escape(introduction)}">
+        <meta property="og:type" content="article">
+        <meta property="og:url" content="#{escape(base_url <> path)}">
+        #{MarkdowWeb.OpenGraph.meta_tags(document, base_url, Keyword.get(opts, :open_graph, []))}\
+        """
+
+      _missing ->
+        ""
+    end
   end
 
   defp provider_details(legal) do

@@ -37,6 +37,12 @@ config :markdow, MarkdowWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: test_port],
   server: false
 
+# Never launch a headless browser during tests. Tests that exercise rendering
+# stub the renderer instead.
+config :browse_chrome, pools: []
+
+config :markdow, open_graph: [enabled: true, cache_dir: Path.join(test_root, "og")]
+
 config :markdow, Markdow.Mailer, adapter: Swoosh.Adapters.Test
 config :argon2_elixir, t_cost: 1, m_cost: 8
 config :logger, level: :warning

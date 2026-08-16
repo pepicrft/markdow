@@ -5,14 +5,20 @@ defmodule Markdow.Application do
 
   @impl true
   def start(_type, _args) do
+    setup_observability()
+
     storage_config = Application.fetch_env!(:markdow, :storage)
 
+    # Warms the headless-browser pool that renders Open Graph images. Empty
+    # when no pool is configured, which is the case in tests.
     children =
       [
+        MarkdowWeb.Telemetry,
         Markdow.Repo,
         storage_child(storage_config)
       ] ++
         agent_auth_sweeper_child() ++
+        BrowseChrome.children() ++
         [
           Markdow.RateLimit,
           {Finch, name: Markdow.Finch},
@@ -25,6 +31,20 @@ defmodule Markdow.Application do
   @impl true
   def config_change(changed, _new, removed) do
     MarkdowWeb.Endpoint.config_change(changed, removed)
+    :ok
+  end
+
+  # Traces, structured logs, and the Ecto and web instrumentation are only
+  # attached when a collector is configured, so an instance without one does not
+  # pay for spans nobody exports. See `config/runtime.exs`.
+  defp setup_observability do
+    if Application.get_env(:markdow, :observability_enabled, false) do
+      :ok = Logger.add_handlers(:markdow)
+      :ok = OpentelemetryBandit.setup(public_endpoint: true)
+      :ok = OpentelemetryPhoenix.setup(adapter: :bandit)
+      :ok = OpentelemetryEcto.setup([:markdow, :repo])
+    end
+
     :ok
   end
 

@@ -55,6 +55,22 @@ config :logger, :default_formatter,
 config :phoenix, :json_library, JSON
 config :postgrex, :json_library, JSON
 
+# Telemetry is opt-in: an instance without a configured collector exports
+# nothing and never opens a connection. `config/runtime.exs` turns the exporters
+# on when OTEL_EXPORTER_OTLP_ENDPOINT is present.
+config :markdow, observability_enabled: false
+config :opentelemetry, traces_exporter: :none
+
+# Social cards are rendered by a pooled headless browser. browse_chrome detects
+# a Chrome or Chromium binary and launches it with the container-safe flags.
+# config/test.exs empties the pool so tests never launch one, and
+# config/runtime.exs makes the size tunable per deployment.
+config :markdow, open_graph: [enabled: true]
+
+config :browse_chrome,
+  default_pool: MarkdowWeb.OpenGraph.BrowserPool,
+  pools: [{MarkdowWeb.OpenGraph.BrowserPool, [pool_size: 1]}]
+
 config :phoenix,
        :filter_parameters,
        ~w(password token email_verification_token claim_token claim_attempt_token user_code assertion data_base64)

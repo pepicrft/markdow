@@ -43,6 +43,7 @@ defmodule MarkdowWeb.Router do
     get "/terms", LegalController, :terms
     get "/privacy", LegalController, :privacy
     get "/cookies", LegalController, :cookies
+    get "/og-image", OpenGraphController, :show
   end
 
   scope "/", MarkdowWeb do

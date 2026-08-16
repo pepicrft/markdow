@@ -74,6 +74,47 @@ if analytics_enabled and config_env() == :prod and URI.parse(analytics_host).sch
   raise "SMOLANALYTICS_HOST must use HTTPS in production"
 end
 
+# Traces, metrics, and logs all travel to the same OpenTelemetry collector. In
+# the production cluster that is the shared Alloy service, which forwards to
+# Tempo, Prometheus, and Loki. Without an endpoint the exporters stay off, which
+# is the expected state for development and for self-hosted instances.
+case System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
+  endpoint when is_binary(endpoint) and endpoint != "" ->
+    config :markdow, observability_enabled: true
+    config :opentelemetry, traces_exporter: :otlp
+    config :opentelemetry_exporter, otlp_endpoint: endpoint
+    config :otel_metric_exporter, otlp_endpoint: endpoint
+
+  _endpoint ->
+    config :markdow, observability_enabled: false
+    config :opentelemetry, traces_exporter: :none
+end
+
+# Social cards cost a headless browser. An instance that cannot afford one, or
+# does not want the marketing pages, sets the pool size to zero: no browser is
+# started, the pages omit the image tags, and the endpoint reports the feature
+# as unavailable.
+if config_env() != :test do
+  open_graph_pool_size =
+    "MARKDOW_OG_BROWSER_POOL_SIZE"
+    |> System.get_env("2")
+    |> String.to_integer()
+
+  open_graph_cache_dir =
+    System.get_env("MARKDOW_OG_CACHE_DIR", Path.join(Path.expand(data_dir), "og"))
+
+  if open_graph_pool_size > 0 do
+    config :browse_chrome,
+      default_pool: MarkdowWeb.OpenGraph.BrowserPool,
+      pools: [{MarkdowWeb.OpenGraph.BrowserPool, [pool_size: open_graph_pool_size]}]
+
+    config :markdow, open_graph: [enabled: true, cache_dir: open_graph_cache_dir]
+  else
+    config :browse_chrome, pools: []
+    config :markdow, open_graph: [enabled: false, cache_dir: open_graph_cache_dir]
+  end
+end
+
 agent_auth_private_key =
   case {config_env(), System.get_env("MARKDOW_AGENT_AUTH_PRIVATE_KEY_PEM")} do
     {:prod, nil} ->

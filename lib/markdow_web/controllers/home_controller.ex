@@ -30,7 +30,14 @@ defmodule MarkdowWeb.HomeController do
     )
     |> put_resp_header("referrer-policy", "no-referrer")
     |> put_resp_header("x-content-type-options", "nosniff")
-    |> send_resp(200, HomePage.html(analytics))
+    |> send_resp(
+      200,
+      HomePage.html(
+        analytics: analytics,
+        base_url: MarkdowWeb.PublicOrigin.from_conn(conn),
+        open_graph: MarkdowWeb.OpenGraph.configuration(conn)
+      )
+    )
   end
 
   defp content_security_policy(analytics) do
