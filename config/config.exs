@@ -55,6 +55,12 @@ config :logger, :default_formatter,
 config :phoenix, :json_library, JSON
 config :postgrex, :json_library, JSON
 
+# Telemetry is opt-in: an instance without a configured collector exports
+# nothing and never opens a connection. `config/runtime.exs` turns the exporters
+# on when OTEL_EXPORTER_OTLP_ENDPOINT is present.
+config :markdow, observability_enabled: false
+config :opentelemetry, traces_exporter: :none
+
 config :phoenix,
        :filter_parameters,
        ~w(password token email_verification_token claim_token claim_attempt_token user_code assertion data_base64)
