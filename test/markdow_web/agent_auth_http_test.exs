@@ -465,6 +465,53 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
     end
   end
 
+  test "keeps a new account usable when the verification email cannot be sent", %{index: index} do
+    broken = failing_email_index(index)
+    registration = register(broken, @email)
+    {claim_path, claim_attempt_token} = claim_location(registration)
+
+    signup =
+      DataCase.browser_conn(
+        :post,
+        "/agent/identity/claim/sign-up",
+        %{
+          "claim_attempt_token" => claim_attempt_token,
+          "name" => "Agent User",
+          "password" => @password
+        },
+        broken
+      )
+
+    # The sign-up form must not come back. The account is already written, so
+    # resubmitting it only reports that the address is taken, and there is no
+    # reset flow to escape that with.
+    assert signup.status == 200
+    assert signup.resp_body =~ "Verify your email"
+    assert signup.resp_body =~ "could not send the verification email"
+    refute signup.resp_body =~ "New to Markdow?"
+
+    user_id = Plug.Conn.get_session(signup, :markdow_user_id)
+    assert is_binary(user_id)
+    session = %{markdow_user_id: user_id}
+
+    pending = DataCase.browser_conn(:get, claim_path, nil, index, session)
+    assert pending.status == 200
+    assert pending.resp_body =~ "Verify your email"
+
+    # Once the relay is reachable, the resend button recovers the same account.
+    resend =
+      DataCase.browser_conn(
+        :post,
+        "/agent/identity/claim/resend-email-verification",
+        %{"claim_attempt_token" => claim_attempt_token},
+        index,
+        session
+      )
+
+    assert resend.status == 200
+    assert_receive {:email, _verification_email}
+  end
+
   defp register(index, email) do
     DataCase.endpoint_conn(
       :post,
@@ -502,6 +549,10 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
     |> List.first()
   end
 
+  defp failing_email_index(index) do
+    %{index | email_notifier: MarkdowWeb.AgentAuthHttpTest.UnreachableRelay}
+  end
+
   defp self_hosted_conn(method, path, body, index, origin) do
     conn =
       if is_nil(body),
@@ -521,4 +572,13 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
     end)
     |> MarkdowWeb.Endpoint.call([])
   end
+end
+
+defmodule MarkdowWeb.AgentAuthHttpTest.UnreachableRelay do
+  @moduledoc false
+
+  @behaviour Markdow.Accounts.EmailNotifier
+
+  @impl true
+  def deliver_verification(_user, _url), do: {:error, :econnrefused}
 end

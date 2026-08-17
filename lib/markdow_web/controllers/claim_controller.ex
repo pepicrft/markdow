@@ -2,6 +2,8 @@ defmodule MarkdowWeb.ClaimController do
   use MarkdowWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
+  require Logger
+
   alias Markdow.Accounts
   alias Markdow.AgentAuth
   alias Markdow.Index
@@ -134,12 +136,13 @@ defmodule MarkdowWeb.ClaimController do
       }) do
     with {:ok, registration} <- AgentAuth.get_claim_attempt(token, auth_opts(conn)),
          {:ok, user} <-
-           Accounts.claim_user(registration.claim_email, name, password, index(conn).repo),
-         {:ok, _email} <- deliver_email_verification(user, token, conn) do
+           Accounts.claim_user(registration.claim_email, name, password, index(conn).repo) do
+      # The account is committed by this point, so a failed send must not send
+      # the person back to the sign-up form. Retrying there only reports that
+      # the address is taken, and there is no reset flow to escape with.
       conn
       |> put_session(:markdow_user_id, user.id)
-      |> put_status(:see_other)
-      |> redirect(to: claim_path(token))
+      |> continue_to_email_verification(registration, user, token)
     else
       {:error, reason} -> render_account_error(conn, token, reason)
     end
@@ -153,12 +156,12 @@ defmodule MarkdowWeb.ClaimController do
   def sign_in(conn, %{"claim_attempt_token" => token, "password" => password}) do
     with {:ok, registration} <- AgentAuth.get_claim_attempt(token, auth_opts(conn)),
          {:ok, user} <-
-           Accounts.authenticate_user(registration.claim_email, password, index(conn).repo),
-         :ok <- ensure_verification_email(user, token, conn) do
+           Accounts.authenticate_user(registration.claim_email, password, index(conn).repo) do
+      # The credentials were right, so an unsendable verification email is not
+      # a reason to refuse the session.
       conn
       |> put_session(:markdow_user_id, user.id)
-      |> put_status(:see_other)
-      |> redirect(to: claim_path(token))
+      |> continue_to_email_verification(registration, user, token)
     else
       {:error, :invalid_credentials} ->
         AgentAuth.record_sign_in_failure(token, auth_opts(conn))
@@ -215,9 +218,16 @@ defmodule MarkdowWeb.ClaimController do
     with {:ok, registration} <- AgentAuth.get_claim_attempt(token, auth_opts(conn)),
          {:ok, %{email: email} = user} <- current_user(conn),
          true <- email == registration.claim_email,
-         true <- is_nil(user.email_verified_at),
-         {:ok, _email} <- deliver_email_verification(user, token, conn) do
-      send_page(conn, 200, email_verification_pending_page(registration, token, nil))
+         true <- is_nil(user.email_verified_at) do
+      send_page(
+        conn,
+        200,
+        email_verification_pending_page(
+          registration,
+          token,
+          deliver_verification_notice(user, token, conn)
+        )
+      )
     else
       _invalid -> send_page(conn, 422, unavailable_page())
     end
@@ -709,6 +719,38 @@ defmodule MarkdowWeb.ClaimController do
 
   defp claim_path(token),
     do: "/agent/identity/claim?claim_attempt_token=" <> URI.encode_www_form(token)
+
+  # Delivery failures used to abandon the request, which stranded the account
+  # that had already been written. The person is kept on the verification step
+  # instead, where the resend button is the way forward.
+  defp continue_to_email_verification(conn, registration, user, token) do
+    case deliver_verification_notice(user, token, conn) do
+      nil ->
+        conn
+        |> put_status(:see_other)
+        |> redirect(to: claim_path(token))
+
+      message ->
+        send_page(conn, 200, email_verification_pending_page(registration, token, message))
+    end
+  end
+
+  # Returns the message to show, or nil when the address is already verified or
+  # the email went out.
+  defp deliver_verification_notice(user, token, conn) do
+    case ensure_verification_email(user, token, conn) do
+      :ok ->
+        nil
+
+      {:error, reason} ->
+        Logger.error("Verification email could not be delivered",
+          user_id: user.id,
+          reason: inspect(reason)
+        )
+
+        "We could not send the verification email. Your account is saved, so use the button below to try again."
+    end
+  end
 
   defp ensure_verification_email(%{email_verified_at: %DateTime{}}, _token, _conn), do: :ok
 
