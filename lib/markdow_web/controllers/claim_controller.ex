@@ -302,164 +302,365 @@ defmodule MarkdowWeb.ClaimController do
   end
 
   defp authentication_page(registration, token, error) do
-    page("""
-    <main id="agent-claim-authentication">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Sign in or create your account</h1>
-      <p>An agent requested access for <strong>#{escape(registration.claim_email)}</strong>.</p>
-      #{error_message(error)}
-      <section>
-        <h2>Already use Markdow?</h2>
-        <form method="post" action="/agent/identity/claim/sign-in">
-          #{csrf_field()}
-          <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
-          <label for="sign-in-password">Password</label>
-          <input id="sign-in-password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="72" required>
-          <button type="submit">Sign in</button>
-        </form>
-      </section>
-      <section data-part="account-choice">
-        <h2>New to Markdow?</h2>
-        <form method="post" action="/agent/identity/claim/sign-up">
+    page("account", """
+    <h1>Sign in or create your account</h1>
+    <p data-part="lead">An agent requested access for #{email_address(registration.claim_email)}.</p>
+    #{steps(:account)}
+    #{error_message(error)}
+    <section>
+      <h2>Already use Markdow?</h2>
+      <form method="post" action="/agent/identity/claim/sign-in">
         #{csrf_field()}
         <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
-          <label for="name">Your name</label>
-          <input id="name" name="name" autocomplete="name" maxlength="160" required>
-          <label for="sign-up-password">Password</label>
-          <input id="sign-up-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" required>
-          <button type="submit">Create account</button>
-        </form>
-      </section>
-      <p data-part="notice">The confirmation code stays with you. Do not send it back to the agent.</p>
-    </main>
+        <label for="sign-in-password">Password</label>
+        <input id="sign-in-password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="72" required>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+    <section data-part="account-choice">
+      <h2>New to Markdow?</h2>
+      <form method="post" action="/agent/identity/claim/sign-up">
+        #{csrf_field()}
+        <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
+        <label for="name">Your name</label>
+        <input id="name" name="name" autocomplete="name" maxlength="160" required>
+        <label for="sign-up-password">Password</label>
+        <input id="sign-up-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" required aria-describedby="sign-up-password-hint">
+        <p id="sign-up-password-hint" data-part="hint">At least 12 characters.</p>
+        <button type="submit">Create account</button>
+      </form>
+    </section>
+    <p data-part="notice">The agent's six-digit code is entered on the next screen, once this account is confirmed. The code stays with you. Do not send it back to the agent.</p>
     """)
   end
 
   defp confirmation_page(_registration, token, user, error) do
-    page("""
-    <main id="agent-claim-confirmation">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Confirm agent access</h1>
-      <p>Signed in as <strong>#{escape(user.email)}</strong>. Enter the six-digit code shown by your agent.</p>
-      #{error_message(error)}
-      <form method="post" action="/agent/identity/claim/confirm">
-        #{csrf_field()}
-        <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
-        <label for="user-code">Confirmation code</label>
-        <input id="user-code" name="user_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
-        <button type="submit">Confirm access</button>
-      </form>
-      <form method="post" action="/agent/identity/claim/sign-out" data-part="secondary-form">
-        #{csrf_field()}
-        <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
-        <button type="submit" data-part="secondary-button">Use another account</button>
-      </form>
-      <p data-part="notice">This grants access only to your account and its vaults.</p>
-    </main>
+    page("code", """
+    <h1>Confirm agent access</h1>
+    <p data-part="lead">Signed in as #{email_address(user.email)}. Enter the six-digit code shown by your agent.</p>
+    #{steps(:code)}
+    #{error_message(error)}
+    <form method="post" action="/agent/identity/claim/confirm">
+      #{csrf_field()}
+      <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
+      <label for="user-code">Confirmation code</label>
+      <input id="user-code" data-part="code-input" name="user_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
+      <button type="submit">Confirm access</button>
+    </form>
+    <form method="post" action="/agent/identity/claim/sign-out" data-part="secondary-form">
+      #{csrf_field()}
+      <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
+      <button type="submit" data-part="secondary-button">Use another account</button>
+    </form>
+    <p data-part="notice">This grants access only to your account and its vaults.</p>
     """)
   end
 
   defp email_verification_pending_page(registration, token, error) do
-    page("""
-    <main id="agent-claim-email-pending">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Verify your email</h1>
-      <p>We sent a one-time verification link to <strong>#{escape(registration.claim_email)}</strong>. Open it before entering the code shown by your agent.</p>
-      #{error_message(error)}
-      <form method="post" action="/agent/identity/claim/resend-email-verification">
-        #{csrf_field()}
-        <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
-        <button type="submit">Send another link</button>
-      </form>
-      <p data-part="notice">The email link expires after 15 minutes. The agent never receives it.</p>
-    </main>
+    page("email", """
+    <h1>Verify your email</h1>
+    <p data-part="lead">We sent a one-time verification link to #{email_address(registration.claim_email)}. Open it before entering the code shown by your agent.</p>
+    #{steps(:email)}
+    #{error_message(error)}
+    <form method="post" action="/agent/identity/claim/resend-email-verification">
+      #{csrf_field()}
+      <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
+      <button type="submit" data-part="secondary-button">Send another link</button>
+    </form>
+    <p data-part="notice">The email link expires after 15 minutes. The agent never receives it.</p>
     """)
   end
 
   defp email_verification_page(email_token, claim_token, email) do
-    page("""
-    <main id="agent-claim-email-verification">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Verify #{escape(email)}</h1>
-      <p>Confirm that you control this address. This does not grant the agent access until you also enter its six-digit code.</p>
-      <form method="post" action="/agent/identity/claim/verify-email">
-        #{csrf_field()}
-        <input type="hidden" name="email_verification_token" value="#{escape(email_token)}">
-        <input type="hidden" name="claim_attempt_token" value="#{escape(claim_token)}">
-        <button type="submit">Verify email</button>
-      </form>
-    </main>
+    page("email", """
+    <h1>Verify your email</h1>
+    <p data-part="lead">Confirm that you control #{email_address(email)}. This does not grant the agent access until you also enter its six-digit code.</p>
+    #{steps(:email)}
+    <form method="post" action="/agent/identity/claim/verify-email">
+      #{csrf_field()}
+      <input type="hidden" name="email_verification_token" value="#{escape(email_token)}">
+      <input type="hidden" name="claim_attempt_token" value="#{escape(claim_token)}">
+      <button type="submit">Verify email</button>
+    </form>
     """)
   end
 
   defp confirmed_page do
-    page("""
-    <main id="agent-claim-confirmed">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Access confirmed</h1>
-      <p>You can close this page and return to the agent.</p>
-    </main>
+    page("done", """
+    <h1>Access confirmed</h1>
+    <p data-part="lead">You can close this page and return to the agent.</p>
+    #{steps(:done)}
     """)
   end
 
   defp account_mismatch_page(token, email \\ nil) do
-    signed_in = if email, do: " You are signed in as #{escape(email)}.", else: ""
+    signed_in = if email, do: " You are signed in as #{email_address(email)}.", else: ""
 
-    page("""
-    <main id="agent-claim-account-mismatch">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Use the requested account</h1>
-      <p>This request belongs to a different email address.#{signed_in}</p>
-      <form method="post" action="/agent/identity/claim/sign-out">
-        #{csrf_field()}
-        <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
-        <button type="submit">Switch account</button>
-      </form>
-    </main>
+    page("account", """
+    <h1>Use the requested account</h1>
+    <p data-part="lead">This request belongs to a different email address.#{signed_in}</p>
+    <form method="post" action="/agent/identity/claim/sign-out">
+      #{csrf_field()}
+      <input type="hidden" name="claim_attempt_token" value="#{escape(token)}">
+      <button type="submit">Switch account</button>
+    </form>
     """)
   end
 
   defp unavailable_page do
-    page("""
-    <main id="agent-claim-unavailable">
-      <p data-part="eyebrow">Markdow agent access</p>
-      <h1>Access unavailable</h1>
-      <p>This request is invalid, expired, or could not be confirmed.</p>
-    </main>
+    page("unavailable", """
+    <h1>Access unavailable</h1>
+    <p data-part="lead">This request is invalid, expired, or could not be confirmed.</p>
+    <p data-part="notice">Ask the agent to start a new request, then open the fresh link it gives you.</p>
     """)
   end
 
-  defp page(content) do
-    """
+  @steps [account: "Account", email: "Verify email", code: "Enter code"]
+
+  # The claim runs across three screens, so every step renders the whole
+  # sequence. Someone who lands on the password form can see that the agent's
+  # code is asked for later rather than looking for a field that is not there
+  # yet.
+  defp steps(current) do
+    order = Keyword.keys(@steps)
+    current_position = Enum.find_index(order, &(&1 == current))
+
+    items =
+      @steps
+      |> Enum.with_index(1)
+      |> Enum.map_join(fn {{step, label}, position} ->
+        """
+        <li data-step="#{step}" data-state="#{step_state(position, current_position)}">\
+        <span data-part="index">Step #{position}</span>#{escape(label)}</li>
+        """
+      end)
+
+    ~s(<ol data-part="steps">#{items}</ol>)
+  end
+
+  defp step_state(_position, nil), do: "done"
+  defp step_state(position, current_position) when position == current_position + 1, do: "current"
+  defp step_state(position, current_position) when position <= current_position, do: "done"
+  defp step_state(_position, _current_position), do: "upcoming"
+
+  # Cloudflare rewrites bare addresses into a script-backed placeholder, and
+  # this page's content security policy blocks the script that would decode it.
+  # The opt-out comments keep the address readable to the person confirming it.
+  defp email_address(value) do
+    ~s(<strong data-part="email"><!--email_off-->#{escape(value)}<!--email_on--></strong>)
+  end
+
+  defp page(step, content) do
+    MarkdowWeb.Theme.inject("""
     <!doctype html>
     <html lang="en">
       <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="robots" content="noindex,nofollow">
-        <title>Markdow agent access</title>
+        <title>Agent access · Markdow</title>
         <style>
-          :root { color-scheme: light dark; font-family: ui-monospace, monospace; }
-          body { min-height: 100vh; display: grid; place-items: center; margin: 0; background: #111; color: #f5f1e8; }
-          main { width: min(34rem, calc(100vw - 3rem)); border: 1px solid #625f58; border-radius: 1rem; padding: 2rem; background: #1b1a18; box-shadow: 0 1.5rem 5rem #0008; }
-          [data-part="eyebrow"] { color: #e5ad55; text-transform: uppercase; letter-spacing: .12em; font-size: .8rem; }
-          [data-part="notice"] { color: #aaa59b; font-size: .85rem; line-height: 1.5; margin-top: 1.5rem; }
-          [data-part="error"] { color: #ffb4a8; border-left: 2px solid #ffb4a8; padding-left: .75rem; }
-          [data-part="account-choice"] { display: block; margin-top: 2rem; padding-top: .5rem; border-top: 1px solid #34322f; }
-          h1 { font-size: 2rem; margin: .5rem 0 1rem; }
-          h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
-          p { line-height: 1.55; }
-          form { display: grid; gap: .75rem; margin-top: 1.5rem; }
-          [data-part="secondary-form"] { margin-top: .75rem; }
-          input, button { box-sizing: border-box; width: 100%; border: 1px solid #625f58; border-radius: .5rem; padding: .8rem; font: inherit; }
-          input { background: #111; color: inherit; }
-          button { margin-top: .5rem; background: #e5ad55; color: #1b1a18; border-color: #e5ad55; font-weight: 700; cursor: pointer; }
-          [data-part="secondary-button"] { margin: 0; background: transparent; color: #f5f1e8; border-color: #625f58; }
+          /* markdow-theme */
+
+          * { box-sizing: border-box; }
+          body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--serif); font-size: var(--text-root); line-height: var(--leading-normal); }
+          a { color: var(--accent); text-underline-offset: 3px; }
+
+          #agent-claim {
+            --page-width: 640px;
+            --page-gutter: 40px;
+
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            margin: 0 auto;
+            width: min(var(--page-width), calc(100% - var(--page-gutter)));
+
+            & > [data-part="masthead"] {
+              display: flex;
+              justify-content: space-between;
+              gap: var(--space-6);
+              padding: var(--space-6) 0;
+              border-bottom: var(--rule-width) solid var(--ink);
+              font: var(--text-small)/var(--leading-snug) var(--sans);
+
+              & a { color: var(--ink); text-decoration: none; }
+              & > [data-part="context"] { color: var(--muted); }
+            }
+
+            & > [data-part="body"] {
+              flex: 1;
+              padding: var(--space-10) 0 var(--space-11);
+
+              @media (max-width: 620px) {
+                & { padding: var(--space-9) 0 var(--space-10); }
+              }
+
+              & h1 {
+                margin: 0 0 var(--space-4);
+                font-family: var(--sans);
+                font-size: var(--text-heading);
+                letter-spacing: var(--tracking-heading);
+                line-height: var(--leading-tight);
+              }
+
+              & h2 {
+                margin: 0;
+                font-family: var(--sans);
+                font-size: var(--text-feature);
+                letter-spacing: var(--tracking-heading);
+                line-height: var(--leading-tight);
+              }
+
+              & > [data-part="lead"] {
+                margin: 0 0 var(--space-8);
+                color: var(--muted);
+                font-size: var(--text-lead);
+
+                & > [data-part="email"] { color: var(--ink); font-weight: var(--weight-medium); }
+              }
+
+              & > section {
+                padding: var(--space-7) 0;
+                border-top: var(--rule-width) solid var(--rule);
+              }
+
+              & > [data-part="notice"] {
+                margin: var(--space-8) 0 0;
+                padding-top: var(--space-5);
+                border-top: var(--rule-width) solid var(--rule);
+                color: var(--muted);
+                font: var(--text-small)/var(--leading-normal) var(--sans);
+              }
+
+              & > [data-part="error"] {
+                margin: 0 0 var(--space-6);
+                padding-left: var(--space-4);
+                border-left: var(--accent-width) solid var(--negative-rule);
+                font-size: var(--text-meta);
+              }
+            }
+
+            & [data-part="steps"] {
+              display: flex;
+              gap: var(--space-4);
+              margin: 0 0 var(--space-9);
+              padding: 0;
+              list-style: none;
+              font: var(--text-mini)/var(--leading-snug) var(--sans);
+
+              & > li {
+                flex: 1;
+                padding-top: var(--space-3);
+                border-top: var(--accent-width) solid var(--rule);
+                color: var(--muted);
+              }
+
+              & > li[data-state="done"] { border-color: var(--accent); }
+
+              & > li[data-state="current"] {
+                border-color: var(--accent);
+                color: var(--ink);
+                font-weight: var(--weight-semibold);
+              }
+
+              & [data-part="index"] {
+                display: block;
+                margin-bottom: var(--space-1);
+                font: var(--text-micro)/var(--leading-flat) var(--mono);
+                letter-spacing: .12em;
+                text-transform: uppercase;
+              }
+            }
+
+            & form {
+              display: grid;
+              gap: var(--space-2);
+              margin-top: var(--space-5);
+            }
+
+            & label {
+              font: var(--weight-medium) var(--text-label)/var(--leading-snug) var(--sans);
+            }
+
+            & [data-part="hint"] {
+              margin: 0;
+              color: var(--muted);
+              font: var(--text-mini)/var(--leading-snug) var(--sans);
+            }
+
+            & input {
+              width: 100%;
+              border: var(--rule-width) solid var(--rule);
+              border-radius: 0;
+              padding: var(--space-4);
+              background: var(--paper);
+              color: var(--ink);
+              font: var(--text-body)/var(--leading-snug) var(--sans);
+
+              &:focus-visible {
+                border-color: var(--accent);
+                outline: var(--accent-width) solid var(--accent);
+                outline-offset: var(--space-1);
+              }
+            }
+
+            & [data-part="code-input"] {
+              font: var(--text-feature)/var(--leading-snug) var(--mono);
+              letter-spacing: .35em;
+            }
+
+            & button {
+              margin-top: var(--space-3);
+              border: var(--rule-width) solid var(--accent);
+              border-radius: 0;
+              padding: var(--space-4) var(--space-6);
+              background: var(--accent);
+              color: var(--ink-inverted);
+              cursor: pointer;
+              font: var(--weight-semibold) var(--text-label)/var(--leading-flat) var(--sans);
+
+              &:hover { border-color: var(--ink); background: var(--ink); }
+
+              &:focus-visible {
+                outline: var(--accent-width) solid var(--ink);
+                outline-offset: var(--space-1);
+              }
+            }
+
+            & [data-part="secondary-form"] { margin-top: 0; }
+
+            & [data-part="secondary-button"] {
+              border-color: var(--rule);
+              background: transparent;
+              color: var(--ink);
+
+              &:hover { border-color: var(--ink); background: var(--wash); color: var(--ink); }
+            }
+
+            & > [data-part="colophon"] {
+              display: flex;
+              justify-content: space-between;
+              gap: var(--space-6);
+              padding: var(--space-6) 0 var(--space-7);
+              border-top: var(--rule-width) solid var(--rule);
+              color: var(--muted);
+              font: var(--text-mini)/var(--leading-normal) var(--sans);
+            }
+          }
         </style>
       </head>
-      <body>#{content}</body>
+      <body>
+        <div id="agent-claim">
+          <header data-part="masthead"><a href="/"><strong>markdow</strong></a><span data-part="context">Agent access</span></header>
+          <main data-part="body" data-step="#{step}">
+            #{content}
+          </main>
+          <footer data-part="colophon"><span>Markdow never shares your password with the agent.</span><a href="/privacy">Privacy</a></footer>
+        </div>
+      </body>
     </html>
-    """
+    """)
   end
 
   defp current_user(conn) do
@@ -470,7 +671,34 @@ defmodule MarkdowWeb.ClaimController do
   end
 
   defp account_error(:invalid_credentials), do: "The password is incorrect."
-  defp account_error(_reason), do: "The account details could not be accepted. Try again."
+
+  # Only the fields the person typed are reported back. Whether an account
+  # already exists stays out of the message, because anyone can start a claim
+  # for any address and the answer would tell them who has an account.
+  defp account_error(%Ecto.Changeset{} = changeset) do
+    case Enum.flat_map([:name, :password], &field_errors(changeset, &1)) do
+      [] -> account_error(:unknown)
+      messages -> Enum.join(messages, " ")
+    end
+  end
+
+  defp account_error(_reason) do
+    "Those details could not be used to create an account. " <>
+      "If this address already has a Markdow account, sign in with its password above instead."
+  end
+
+  defp field_errors(changeset, field) do
+    changeset.errors
+    |> Keyword.get_values(field)
+    |> Enum.map(fn {message, opts} ->
+      message =
+        Regex.replace(~r/%\{(\w+)\}/, message, fn _match, key ->
+          opts |> Enum.find_value("", fn {k, v} -> to_string(k) == key && to_string(v) end)
+        end)
+
+      "#{String.capitalize(to_string(field))} #{message}."
+    end)
+  end
 
   defp error_message(nil), do: ""
   defp error_message(message), do: ~s(<p data-part="error">#{escape(message)}</p>)
