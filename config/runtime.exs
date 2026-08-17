@@ -225,6 +225,16 @@ config :markdow,
     {System.get_env("MARKDOW_EMAIL_FROM_NAME", "Markdow"),
      System.get_env("MARKDOW_EMAIL_FROM_ADDRESS", "hello@markdow.org")},
   embedding_secret_key: embedding_secret_key,
+  # Accounts choose their own embeddings endpoint, and anything resolving to a
+  # private address is refused so the server cannot be aimed at internal
+  # services. An operator names hosts that are exempt, comma separated, which is
+  # how a deployment permits a gateway it runs itself.
+  embeddings_allowed_hosts:
+    "MARKDOW_EMBEDDINGS_ALLOWED_HOSTS"
+    |> System.get_env("")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "")),
   marketing_routes: marketing_routes,
   legal: legal,
   rate_limits: [
