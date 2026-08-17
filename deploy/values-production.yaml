@@ -26,7 +26,10 @@ extraEnv:
   MARKDOW_MARKETING_ROUTES: "true"
   MARKDOW_OG_BROWSER_POOL_SIZE: "2"
   MARKDOW_SMTP_PORT: "587"
-  MARKDOW_SMTP_RELAY: smtp-relay.pepicrft.me
+  # The relay runs in this cluster, so address it by its service name. The
+  # public hostname resolves to a host that does not accept submissions, which
+  # silently broke every email verification.
+  MARKDOW_SMTP_RELAY: smtp-relay.smtp-relay.svc.cluster.local
   MARKDOW_STORAGE_DRIVER: local
   MARKDOW_STORAGE_PATH: /app/data/vault
   # Traces, metrics, and structured logs go to the shared Alloy collector in the
