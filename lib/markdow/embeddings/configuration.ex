@@ -5,12 +5,14 @@ defmodule Markdow.Embeddings.Configuration do
 
   import Ecto.Changeset
 
+  alias Markdow.Embeddings.EndpointPolicy
+
   @primary_key false
   @timestamps_opts [type: :utc_datetime_usec]
 
   @type t :: %__MODULE__{
-          vault_id: String.t(),
-          provider: String.t(),
+          user_id: String.t(),
+          endpoint: String.t(),
           model: String.t(),
           dimensions: pos_integer() | nil,
           token_ciphertext: binary(),
@@ -20,9 +22,9 @@ defmodule Markdow.Embeddings.Configuration do
           validated_at: DateTime.t() | nil
         }
 
-  schema "embedding_configurations" do
-    field(:vault_id, :string, primary_key: true)
-    field(:provider, :string)
+  schema "user_embedding_configurations" do
+    field(:user_id, :string, primary_key: true)
+    field(:endpoint, :string)
     field(:model, :string)
     field(:dimensions, :integer)
     field(:token_ciphertext, :binary)
@@ -37,8 +39,8 @@ defmodule Markdow.Embeddings.Configuration do
   def changeset(configuration, attrs) do
     configuration
     |> cast(attrs, [
-      :vault_id,
-      :provider,
+      :user_id,
+      :endpoint,
       :model,
       :dimensions,
       :token_ciphertext,
@@ -48,17 +50,37 @@ defmodule Markdow.Embeddings.Configuration do
       :validated_at
     ])
     |> validate_required([
-      :vault_id,
-      :provider,
+      :user_id,
+      :endpoint,
       :model,
       :token_ciphertext,
       :token_iv,
       :token_tag,
       :token_suffix
     ])
-    |> validate_inclusion(:provider, ["openai"])
-    |> validate_length(:model, min: 1, max: 120)
+    |> validate_length(:endpoint, min: 1, max: 500)
+    |> validate_length(:model, min: 1, max: 200)
     |> validate_number(:dimensions, greater_than: 0, less_than_or_equal_to: 10_000)
-    |> foreign_key_constraint(:vault_id)
+    |> validate_endpoint()
+    |> foreign_key_constraint(:user_id)
   end
+
+  # The address is checked here as well as before each request, so a refused
+  # endpoint is reported as a validation error rather than reaching the wire.
+  defp validate_endpoint(changeset) do
+    validate_change(changeset, :endpoint, fn :endpoint, endpoint ->
+      case EndpointPolicy.check(endpoint) do
+        {:ok, _uri} -> []
+        {:error, reason} -> [endpoint: message(reason)]
+      end
+    end)
+  end
+
+  defp message(:embedding_endpoint_insecure), do: "must use https"
+
+  defp message(:embedding_endpoint_forbidden),
+    do: "must not resolve to a private or loopback address"
+
+  defp message(:embedding_endpoint_unresolvable), do: "could not be resolved"
+  defp message(_reason), do: "is not a valid endpoint"
 end

@@ -175,8 +175,8 @@ defmodule MarkdowWeb.AuthMarkdownController do
     - `notes:write`: create, update, import, delete, and rebuild notes in that user's vaults.
     - `documents:read`: list and read path-preserving Markdown and non-Markdown documents.
     - `documents:write`: create, replace, and delete path-preserving documents.
-    - `embeddings:read`: inspect redacted embedding configuration in that user's vaults.
-    - `embeddings:write`: configure, validate, use, and delete embedding configuration in that user's vaults.
+    - `embeddings:read`: inspect that user's redacted embedding configuration.
+    - `embeddings:write`: configure, validate, use, and delete that user's embedding configuration. The account supplies its own endpoint, model, and credential, and the endpoint must speak the OpenAI embeddings protocol over https.
     - `mcp`: connect to the MCP server with an MCP-bound token.
 
     `users:write` is reserved for an operator application key and is never granted to an agent registration.

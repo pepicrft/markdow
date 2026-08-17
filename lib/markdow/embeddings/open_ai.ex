@@ -1,9 +1,14 @@
 defmodule Markdow.Embeddings.OpenAI do
-  @moduledoc "Calls the OpenAI embeddings application programming interface."
+  @moduledoc """
+  Calls an embeddings application programming interface speaking the OpenAI
+  protocol.
+
+  The address comes from the account's configuration, so each account reaches
+  its own provider. A gateway that routes on a provider-qualified model wants
+  that prefix in the configured model rather than here.
+  """
 
   @behaviour Markdow.Embeddings.Client
-
-  @endpoint "https://api.openai.com/v1/embeddings"
 
   @impl true
   def embed(configuration, token, input) do
@@ -14,7 +19,7 @@ defmodule Markdow.Embeddings.OpenAI do
     request =
       Finch.build(
         :post,
-        @endpoint,
+        configuration.endpoint,
         [
           {"authorization", "Bearer #{token}"},
           {"content-type", "application/json"},

@@ -34,7 +34,11 @@ defmodule MarkdowWeb.ApiResponse do
              :invalid_query,
              :invalid_embedding_input,
              :embedding_provider_rejected,
-             :embedding_provider_invalid_response
+             :embedding_provider_invalid_response,
+             :embedding_endpoint_invalid,
+             :embedding_endpoint_insecure,
+             :embedding_endpoint_forbidden,
+             :embedding_endpoint_unresolvable
            ] do
     conn |> put_status(422) |> json(%{error: to_string(reason)})
   end

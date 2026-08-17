@@ -372,8 +372,8 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfiguration do
       title: "EmbeddingConfiguration",
       type: :object,
       properties: %{
-        vault_id: %OpenApiSpex.Schema{type: :string},
-        provider: %OpenApiSpex.Schema{type: :string},
+        user_id: %OpenApiSpex.Schema{type: :string},
+        endpoint: %OpenApiSpex.Schema{type: :string},
         model: %OpenApiSpex.Schema{type: :string},
         dimensions: %OpenApiSpex.Schema{type: :integer, nullable: true},
         credential_hint: %OpenApiSpex.Schema{type: :string},
@@ -382,8 +382,8 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfiguration do
         updated_at: %OpenApiSpex.Schema{type: :string}
       },
       required: [
-        :vault_id,
-        :provider,
+        :user_id,
+        :endpoint,
         :model,
         :credential_hint,
         :created_at,
@@ -404,12 +404,17 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfigurationInput do
       title: "EmbeddingConfigurationInput",
       type: :object,
       properties: %{
-        provider: %OpenApiSpex.Schema{type: :string, enum: ["openai"], default: "openai"},
-        model: %OpenApiSpex.Schema{type: :string, default: "text-embedding-3-small"},
+        endpoint: %OpenApiSpex.Schema{
+          type: :string,
+          description:
+            "An endpoint speaking the OpenAI embeddings protocol. Must use https and must not resolve to a private or loopback address.",
+          example: "https://api.openai.com/v1/embeddings"
+        },
+        model: %OpenApiSpex.Schema{type: :string, example: "text-embedding-3-small"},
         dimensions: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 10_000},
         token: %OpenApiSpex.Schema{type: :string, format: :password, writeOnly: true}
       },
-      required: [:token],
+      required: [:endpoint, :model, :token],
       additionalProperties: false
     },
     derive?: false
@@ -445,12 +450,12 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingValidation do
       type: :object,
       properties: %{
         status: %OpenApiSpex.Schema{type: :string},
-        vault_id: %OpenApiSpex.Schema{type: :string},
-        provider: %OpenApiSpex.Schema{type: :string},
+        user_id: %OpenApiSpex.Schema{type: :string},
+        endpoint: %OpenApiSpex.Schema{type: :string},
         model: %OpenApiSpex.Schema{type: :string},
         dimensions: %OpenApiSpex.Schema{type: :integer}
       },
-      required: [:status, :vault_id, :provider, :model, :dimensions]
+      required: [:status, :user_id, :endpoint, :model, :dimensions]
     },
     derive?: false
   )
@@ -487,7 +492,8 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingResult do
       type: :object,
       properties: %{
         vault_id: %OpenApiSpex.Schema{type: :string},
-        provider: %OpenApiSpex.Schema{type: :string},
+        user_id: %OpenApiSpex.Schema{type: :string},
+        endpoint: %OpenApiSpex.Schema{type: :string},
         model: %OpenApiSpex.Schema{type: :string},
         embedding: %OpenApiSpex.Schema{
           type: :array,
@@ -496,7 +502,7 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingResult do
         dimensions: %OpenApiSpex.Schema{type: :integer},
         usage: %OpenApiSpex.Schema{type: :object, additionalProperties: true}
       },
-      required: [:vault_id, :provider, :model, :embedding, :dimensions, :usage]
+      required: [:vault_id, :user_id, :endpoint, :model, :embedding, :dimensions, :usage]
     },
     derive?: false
   )
@@ -512,10 +518,10 @@ defmodule MarkdowWeb.ApiSchemas.DeletedEmbeddingConfiguration do
       title: "DeletedEmbeddingConfiguration",
       type: :object,
       properties: %{
-        vault_id: %OpenApiSpex.Schema{type: :string},
+        user_id: %OpenApiSpex.Schema{type: :string},
         deleted: %OpenApiSpex.Schema{type: :boolean}
       },
-      required: [:vault_id, :deleted]
+      required: [:user_id, :deleted]
     },
     derive?: false
   )

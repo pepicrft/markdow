@@ -24,20 +24,20 @@ defmodule MarkdowWeb.EmbeddingController do
   operation :show,
     operation_id: "get_embedding_configuration",
     summary: "Get a redacted embedding configuration",
-    parameters: [vault_id: [in: :path, type: :string, required: true]],
+    parameters: [user_id: [in: :path, type: :string, required: true]],
     responses: [ok: {"Embedding configuration", "application/json", EmbeddingConfiguration}]
 
   operation :update,
     operation_id: "configure_embedding",
-    summary: "Configure embeddings with a user-supplied credential",
-    parameters: [vault_id: [in: :path, type: :string, required: true]],
+    summary: "Configure embeddings with an account-supplied endpoint and credential",
+    parameters: [user_id: [in: :path, type: :string, required: true]],
     request_body: {"Embedding configuration", "application/json", EmbeddingConfigurationInput},
     responses: [ok: {"Embedding configuration", "application/json", EmbeddingConfiguration}]
 
   operation :validate,
     operation_id: "validate_embedding_configuration",
     summary: "Validate an embedding configuration",
-    parameters: [vault_id: [in: :path, type: :string, required: true]],
+    parameters: [user_id: [in: :path, type: :string, required: true]],
     request_body: {"Optional temporary credential", "application/json", EmbeddingValidationInput},
     responses: [ok: {"Validation result", "application/json", EmbeddingValidation}]
 
@@ -51,25 +51,27 @@ defmodule MarkdowWeb.EmbeddingController do
   operation :delete,
     operation_id: "delete_embedding_configuration",
     summary: "Delete an embedding configuration",
-    parameters: [vault_id: [in: :path, type: :string, required: true]],
+    parameters: [user_id: [in: :path, type: :string, required: true]],
     responses: [
       ok: {"Deleted embedding configuration", "application/json", DeletedEmbeddingConfiguration}
     ]
 
-  def show(conn, %{"vault_id" => vault_id}),
-    do: call(conn, "get_embedding_configuration", %{"vault_id" => vault_id})
+  def show(conn, %{"user_id" => user_id}),
+    do: call(conn, "get_embedding_configuration", %{"user_id" => user_id})
 
-  def update(conn, %{"vault_id" => vault_id} = params),
-    do: call(conn, "configure_embedding", Map.put(params, "vault_id", vault_id))
+  def update(conn, %{"user_id" => user_id} = params),
+    do: call(conn, "configure_embedding", Map.put(params, "user_id", user_id))
 
-  def validate(conn, %{"vault_id" => vault_id} = params),
-    do: call(conn, "validate_embedding_configuration", Map.put(params, "vault_id", vault_id))
+  def validate(conn, %{"user_id" => user_id} = params),
+    do: call(conn, "validate_embedding_configuration", Map.put(params, "user_id", user_id))
 
+  # Embedding stays addressed by vault, since the text belongs to one. The
+  # configuration used is the one owned by the account that owns the vault.
   def embed(conn, %{"vault_id" => vault_id} = params),
     do: call(conn, "embed_text", Map.put(params, "vault_id", vault_id))
 
-  def delete(conn, %{"vault_id" => vault_id}),
-    do: call(conn, "delete_embedding_configuration", %{"vault_id" => vault_id})
+  def delete(conn, %{"user_id" => user_id}),
+    do: call(conn, "delete_embedding_configuration", %{"user_id" => user_id})
 
   defp call(conn, operation, arguments) do
     MarkdowWeb.ApiResponse.send_result(
