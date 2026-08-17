@@ -166,7 +166,8 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
       )
 
     assert verification_page.status == 200
-    assert verification_page.resp_body =~ "Verify #{@email}"
+    assert verification_page.resp_body =~ "Verify your email"
+    assert verification_page.resp_body =~ @email
 
     verified =
       DataCase.browser_conn(
@@ -379,7 +380,7 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
       )
 
     assert response.status == 422
-    assert response.resp_body =~ "account details could not be accepted"
+    assert response.resp_body =~ "could not be used to create an account"
     assert Plug.Conn.get_session(response, :markdow_user_id) == nil
     assert {:ok, unchanged} = Accounts.get_user(seeded.id, index.repo)
     assert unchanged.name == "Operator-created"
