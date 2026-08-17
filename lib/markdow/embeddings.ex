@@ -44,12 +44,14 @@ defmodule Markdow.Embeddings do
   def put_configuration(%Context{} = index, user_id, attrs) when is_map(attrs) do
     existing = index.repo.get(Configuration, user_id)
 
+    supplied = Map.get(attrs, "token")
+
     with {:ok, _user} <- Accounts.get_user(user_id, index.repo),
-         {:ok, token} <- token(existing, index, user_id, Map.get(attrs, "token")),
+         {:ok, token} <- token(existing, index, user_id, supplied),
          {:ok, candidate} <- candidate(user_id, existing, attrs),
-         {:ok, secret_attrs} <- secret_attrs(index, user_id, existing, Map.get(attrs, "token")),
+         {:ok, secret_attrs} <- secret_attrs(index, user_id, existing, supplied),
          {:ok, _result} <- request(index, candidate, token, @validation_input),
-         {:ok, stored} <- store(index, user_id, candidate, secret_attrs) do
+         {:ok, stored} <- store(index, user_id, candidate, secret_attrs, supplied) do
       {:ok, public_configuration(stored)}
     end
   end
@@ -158,7 +160,14 @@ defmodule Markdow.Embeddings do
   defp dimensions_of(%Configuration{dimensions: dimensions}), do: dimensions
   defp dimensions_of(_existing), do: nil
 
-  defp store(index, user_id, candidate, secret_attrs) do
+  # An update that does not carry a new credential must not write the credential
+  # columns at all. Writing back the values read at the start would undo a
+  # credential another request changed while the provider call was in flight.
+  #
+  # `returning: true` makes the database supply the stored row, so a caller is
+  # told the real creation time rather than the one this insert proposed and the
+  # conflict clause discarded.
+  defp store(index, user_id, candidate, secret_attrs, supplied) do
     attrs =
       %{
         user_id: user_id,
@@ -169,23 +178,29 @@ defmodule Markdow.Embeddings do
       }
       |> Map.merge(secret_attrs)
 
+    replaced =
+      if is_binary(supplied) and supplied != "" do
+        [
+          :endpoint,
+          :model,
+          :dimensions,
+          :token_ciphertext,
+          :token_iv,
+          :token_tag,
+          :token_suffix,
+          :validated_at,
+          :updated_at
+        ]
+      else
+        [:endpoint, :model, :dimensions, :validated_at, :updated_at]
+      end
+
     %Configuration{user_id: user_id}
     |> Configuration.changeset(attrs)
     |> index.repo.insert(
       conflict_target: :user_id,
-      on_conflict:
-        {:replace,
-         [
-           :endpoint,
-           :model,
-           :dimensions,
-           :token_ciphertext,
-           :token_iv,
-           :token_tag,
-           :token_suffix,
-           :validated_at,
-           :updated_at
-         ]}
+      on_conflict: {:replace, replaced},
+      returning: true
     )
   end
 

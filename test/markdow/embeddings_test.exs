@@ -1,11 +1,36 @@
 defmodule Markdow.EmbeddingsTest do
   use Markdow.DataCase, async: true
 
+  alias Ecto.Adapters.SQL.Sandbox
+  alias Markdow.Accounts
   alias Markdow.Embeddings
   alias Markdow.Embeddings.Configuration
   alias Markdow.Embeddings.OpenAI
+  alias Markdow.Operations
   alias Markdow.Repo
   alias Markdow.Secrets
+
+  defmodule StubClient do
+    @behaviour Markdow.Embeddings.Client
+
+    @impl true
+    def embed(%{model: "slow:" <> encoded_model} = configuration, token, _input) do
+      parent =
+        encoded_model |> Base.url_decode64!(padding: false) |> :erlang.binary_to_term([:safe])
+
+      send(parent, {:slow_candidate_ready, self(), token})
+
+      receive do
+        :release -> result(configuration)
+      end
+    end
+
+    def embed(configuration, _token, _input), do: result(configuration)
+
+    defp result(configuration) do
+      {:ok, %{embedding: [0.1], model: configuration.model, usage: %{}}}
+    end
+  end
 
   setup :verify_on_exit!
 
@@ -164,6 +189,110 @@ defmodule Markdow.EmbeddingsTest do
 
     assert Secrets.decrypt(encrypted, nil, "usr_test") ==
              {:error, :embedding_secret_key_unavailable}
+  end
+
+  # Regression tests for defects an adversarial review found in this change.
+
+  test "refuses a vault-scoped call carrying an unrelated user_id", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, victim} =
+      Accounts.create_user(
+        %{"id" => "review-victim", "email" => "victim@example.com"},
+        index.repo
+      )
+
+    {:ok, victim_vault} =
+      Accounts.create_vault(victim.id, %{"id" => "review-vault", "name" => "Victim"}, index.repo)
+
+    {:ok, _configuration} =
+      Embeddings.put_configuration(index, victim.id, %{
+        "endpoint" => @endpoint,
+        "model" => "victim-model",
+        "token" => "victim-token"
+      })
+
+    # Authorization used to be chosen by the shape of the arguments, so adding a
+    # user_id the caller does own made a vault-scoped call authorize against
+    # that account and never check the vault. It would then embed with the
+    # vault owner's credential.
+    assert Operations.call(
+             "embed_text",
+             %{"vault_id" => victim_vault.id, "user_id" => @user, "input" => "private"},
+             index,
+             %{kind: :access_token, user_id: @user}
+           ) == {:error, :forbidden}
+  end
+
+  test "keeps the newest credential when a slow update omits the token", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, initial} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "initial",
+        "token" => "old-token"
+      })
+
+    encoded_parent = self() |> :erlang.term_to_binary() |> Base.url_encode64(padding: false)
+
+    slow =
+      Task.async(fn ->
+        receive do
+          :go ->
+            Embeddings.put_configuration(index, @user, %{"model" => "slow:" <> encoded_parent})
+        end
+      end)
+
+    Sandbox.allow(Repo, self(), slow.pid)
+    send(slow.pid, :go)
+
+    # The slow update has read the stored credential and is now mid-request.
+    assert_receive {:slow_candidate_ready, slow_pid, "old-token"}
+
+    assert {:ok, _fast} =
+             Embeddings.put_configuration(index, @user, %{
+               "model" => "fast",
+               "token" => "new-token"
+             })
+
+    send(slow_pid, :release)
+    assert {:ok, slow_result} = Task.await(slow)
+
+    # An update carrying no token must not write the credential columns, or it
+    # would put back the credential it read before the other write landed.
+    stored = Repo.get!(Configuration, @user)
+    assert {:ok, final_token} = Secrets.decrypt(stored, index.embedding_secret_key, @user)
+    assert final_token == "new-token"
+    assert stored.model == slow_result.model
+
+    # The creation time reported is the stored one, not the one this write
+    # proposed and the conflict clause discarded.
+    assert slow_result.created_at == initial.created_at
+  end
+
+  test "updates the model without resending the credential", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, _initial} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "initial",
+        "token" => "old-token"
+      })
+
+    assert {:ok, updated} =
+             Operations.call(
+               "configure_embedding",
+               %{"user_id" => @user, "model" => "updated"},
+               index
+             )
+
+    assert updated.model == "updated"
+    assert updated.endpoint == @endpoint
+
+    stored = Repo.get!(Configuration, @user)
+    assert {:ok, "old-token"} = Secrets.decrypt(stored, index.embedding_secret_key, @user)
   end
 
   defp configure(index) do

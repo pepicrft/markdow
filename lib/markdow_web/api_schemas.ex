@@ -414,7 +414,7 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfigurationInput do
         dimensions: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 10_000},
         token: %OpenApiSpex.Schema{type: :string, format: :password, writeOnly: true}
       },
-      required: [:endpoint, :model, :token],
+      required: [],
       additionalProperties: false
     },
     derive?: false

@@ -256,7 +256,7 @@ defmodule Markdow.Operations do
       %{
         name: "configure_embedding",
         description:
-          "Configure the embeddings endpoint, model, and encrypted credential for an account. The endpoint must speak the OpenAI embeddings protocol over https and must not resolve to a private address. Nothing is stored until a real embedding request succeeds.",
+          "Configure the embeddings endpoint, model, and encrypted credential for an account. The endpoint must speak the OpenAI embeddings protocol over https and must not resolve to a private address. Nothing is stored until a real embedding request succeeds. Creating a configuration needs endpoint, model, and token; updating one may send any subset, and the stored credential is kept when token is omitted.",
         scope: "embeddings:write",
         inputSchema:
           object_schema(
@@ -267,7 +267,7 @@ defmodule Markdow.Operations do
               "dimensions" => integer_schema(1, 10_000),
               "token" => string_schema()
             },
-            ["user_id", "endpoint", "model", "token"]
+            ["user_id"]
           ),
         annotations: %{idempotentHint: true}
       },
@@ -430,12 +430,10 @@ defmodule Markdow.Operations do
   def call("get_embedding_configuration", %{"user_id" => user_id}, index),
     do: Embeddings.get_configuration(index, user_id)
 
-  def call(
-        "configure_embedding",
-        %{"user_id" => user_id, "token" => _token} = arguments,
-        index
-      ),
-      do: Embeddings.put_configuration(index, user_id, Map.delete(arguments, "user_id"))
+  # The token is optional: an account updating only its model or endpoint keeps
+  # the credential it already stored.
+  def call("configure_embedding", %{"user_id" => user_id} = arguments, index),
+    do: Embeddings.put_configuration(index, user_id, Map.delete(arguments, "user_id"))
 
   def call("validate_embedding_configuration", %{"user_id" => user_id} = arguments, index),
     do: Embeddings.validate_configuration(index, user_id, Map.get(arguments, "token"))
@@ -502,8 +500,19 @@ defmodule Markdow.Operations do
   defp authorize_arguments("get_vault", %{"id" => vault_id}, index, authorization),
     do: authorize_vault(vault_id, index, authorization)
 
-  defp authorize_arguments(_name, %{"user_id" => user_id}, _index, authorization),
-    do: authorize_user(user_id, authorization)
+  # Named rather than matched on the shape of the arguments. A clause matching
+  # any map that merely carries a "user_id" would also catch the vault-scoped
+  # operations, and a caller adding that key to a vault-scoped call would then
+  # be checked against an account it already owns while the vault went
+  # unchecked.
+  defp authorize_arguments(name, %{"user_id" => user_id}, _index, authorization)
+       when name in [
+              "get_embedding_configuration",
+              "configure_embedding",
+              "validate_embedding_configuration",
+              "delete_embedding_configuration"
+            ],
+       do: authorize_user(user_id, authorization)
 
   defp authorize_arguments(_name, %{"vault_id" => vault_id}, index, authorization),
     do: authorize_vault(vault_id, index, authorization)
