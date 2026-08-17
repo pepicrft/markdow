@@ -1,5 +1,7 @@
 defmodule Markdow.Embeddings.OpenAITest do
-  use ExUnit.Case, async: true
+  # The endpoint lives in application environment, which is global, so these
+  # cannot run alongside other tests reading it.
+  use ExUnit.Case, async: false
   use Mimic
 
   alias Markdow.Embeddings.Configuration
@@ -50,6 +52,53 @@ defmodule Markdow.Embeddings.OpenAITest do
     assert result.usage == %{"prompt_tokens" => 3, "total_tokens" => 3}
   end
 
+  test "defaults to OpenAI when the deployment configures nothing" do
+    put_endpoint(nil)
+
+    assert OpenAI.endpoint() == "https://api.openai.com/v1/embeddings"
+  end
+
+  test "sends to the gateway the deployment configures, still as a bearer token" do
+    put_endpoint("http://bifrost.bifrost.svc.cluster.local:8080/v1/embeddings")
+
+    expect(Finch, :request, fn request, Markdow.Finch, _options ->
+      assert request.scheme == :http
+      assert request.host == "bifrost.bifrost.svc.cluster.local"
+      assert request.port == 8080
+      assert request.path == "/v1/embeddings"
+
+      # Bifrost accepts the credential this way, so the gateway needs no
+      # special header handling here.
+      assert {"authorization", "Bearer virtual-key"} in request.headers
+
+      # A gateway routes on a provider-qualified model, which comes from the
+      # vault's configuration untouched.
+      payload = request.body |> IO.iodata_to_binary() |> JSON.decode!()
+      assert payload["model"] == "fireworks/nomic-ai/nomic-embed-text-v1.5"
+
+      {:ok,
+       %Finch.Response{
+         status: 200,
+         body:
+           JSON.encode!(%{
+             data: [%{embedding: [0.5, 0.6], index: 0, object: "embedding"}],
+             model: "fireworks/nomic-ai/nomic-embed-text-v1.5",
+             object: "list",
+             usage: %{prompt_tokens: 2, total_tokens: 2}
+           })
+       }}
+    end)
+
+    configuration = %Configuration{
+      vault_id: "default",
+      provider: "openai",
+      model: "fireworks/nomic-ai/nomic-embed-text-v1.5"
+    }
+
+    assert {:ok, result} = OpenAI.embed(configuration, "virtual-key", "Text to embed")
+    assert result.embedding == [0.5, 0.6]
+  end
+
   test "returns stable provider errors without exposing response contents" do
     expect(Finch, :request, fn _request, Markdow.Finch, _options ->
       {:ok, %Finch.Response{status: 401, body: ~s({"error":"secret provider detail"})}}
@@ -59,5 +108,23 @@ defmodule Markdow.Embeddings.OpenAITest do
 
     assert OpenAI.embed(configuration, "invalid-token", "Text") ==
              {:error, :embedding_provider_rejected}
+  end
+
+  # Restores whatever the environment had, deleting the key when it was unset
+  # so the module default applies again rather than a stored nil.
+  defp put_endpoint(value) do
+    original = Application.fetch_env(:markdow, :embeddings_endpoint)
+
+    on_exit(fn ->
+      case original do
+        {:ok, endpoint} -> Application.put_env(:markdow, :embeddings_endpoint, endpoint)
+        :error -> Application.delete_env(:markdow, :embeddings_endpoint)
+      end
+    end)
+
+    case value do
+      nil -> Application.delete_env(:markdow, :embeddings_endpoint)
+      endpoint -> Application.put_env(:markdow, :embeddings_endpoint, endpoint)
+    end
   end
 end

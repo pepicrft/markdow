@@ -1,9 +1,21 @@
 defmodule Markdow.Embeddings.OpenAI do
-  @moduledoc "Calls the OpenAI embeddings application programming interface."
+  @moduledoc """
+  Calls an embeddings application programming interface speaking the OpenAI
+  protocol.
+
+  The endpoint defaults to OpenAI and is overridden with
+  `MARKDOW_EMBEDDINGS_ENDPOINT`, so a deployment can route embeddings through a
+  gateway of its own. Gateways that expect a provider-qualified model name want
+  that prefix in the vault's configured model rather than here.
+  """
 
   @behaviour Markdow.Embeddings.Client
 
-  @endpoint "https://api.openai.com/v1/embeddings"
+  @default_endpoint "https://api.openai.com/v1/embeddings"
+
+  @doc "The endpoint embeddings are sent to."
+  @spec endpoint() :: String.t()
+  def endpoint, do: Application.get_env(:markdow, :embeddings_endpoint, @default_endpoint)
 
   @impl true
   def embed(configuration, token, input) do
@@ -14,7 +26,7 @@ defmodule Markdow.Embeddings.OpenAI do
     request =
       Finch.build(
         :post,
-        @endpoint,
+        endpoint(),
         [
           {"authorization", "Bearer #{token}"},
           {"content-type", "application/json"},

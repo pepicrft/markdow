@@ -225,6 +225,11 @@ config :markdow,
     {System.get_env("MARKDOW_EMAIL_FROM_NAME", "Markdow"),
      System.get_env("MARKDOW_EMAIL_FROM_ADDRESS", "hello@markdow.org")},
   embedding_secret_key: embedding_secret_key,
+  # Any endpoint speaking the OpenAI embeddings protocol works here, so a
+  # deployment can send embeddings through its own gateway. The operator sets
+  # it, never a user, so no request is ever made to a user-supplied address.
+  embeddings_endpoint:
+    System.get_env("MARKDOW_EMBEDDINGS_ENDPOINT", "https://api.openai.com/v1/embeddings"),
   marketing_routes: marketing_routes,
   legal: legal,
   rate_limits: [

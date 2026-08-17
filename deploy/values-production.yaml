@@ -23,6 +23,11 @@ extraEnv:
   MARKDOW_DATA_DIR: /app/data
   MARKDOW_EMAIL_FROM_ADDRESS: markdow@pepicrft.me
   MARKDOW_EMAIL_FROM_NAME: Markdow
+  # Embeddings go through the cluster's Bifrost gateway, which speaks the
+  # OpenAI protocol. Bifrost routes on a provider-qualified model name, so a
+  # vault configures something like fireworks/nomic-ai/nomic-embed-text-v1.5
+  # and supplies a Bifrost virtual key as its token.
+  MARKDOW_EMBEDDINGS_ENDPOINT: http://bifrost.bifrost.svc.cluster.local:8080/v1/embeddings
   MARKDOW_MARKETING_ROUTES: "true"
   MARKDOW_OG_BROWSER_POOL_SIZE: "2"
   MARKDOW_SMTP_PORT: "587"
