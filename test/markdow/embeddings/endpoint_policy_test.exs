@@ -88,4 +88,60 @@ defmodule Markdow.Embeddings.EndpointPolicyTest do
 
     assert {:ok, %URI{}} = EndpointPolicy.check("https://gateway.internal/v1/embeddings")
   end
+
+  test "refuses loopback written as an integer, in octal, and in hexadecimal" do
+    # The host is resolved before it is judged, so these normalise to 127.0.0.1
+    # rather than being read as names.
+    for host <- ["2130706433", "0177.0.0.1", "0x7f000001", "127.1"] do
+      assert EndpointPolicy.check("https://#{host}/v1/embeddings") ==
+               {:error, :embedding_endpoint_forbidden},
+             "expected #{host} to be refused"
+    end
+  end
+
+  test "judges the host and not the credentials in front of it" do
+    assert EndpointPolicy.check("https://public.example@127.0.0.1/v1/embeddings") ==
+             {:error, :embedding_endpoint_forbidden}
+  end
+
+  test "refuses every IPv6 form that carries an internal IPv4 address" do
+    for host <- [
+          # Mapped, the form a Linux host routes straight to IPv4.
+          "::ffff:127.0.0.1",
+          "::ffff:169.254.169.254",
+          "::ffff:10.0.0.1",
+          # Compatible, translated, NAT64, and 6to4, which used to reach the
+          # catch-all and be answered "public".
+          "::127.0.0.1",
+          "::ffff:0:127.0.0.1",
+          "64:ff9b::127.0.0.1",
+          "64:ff9b:1::169.254.169.254",
+          "2002:7f00:1::"
+        ] do
+      assert EndpointPolicy.check("https://[#{host}]/v1/embeddings") ==
+               {:error, :embedding_endpoint_forbidden},
+             "expected #{host} to be refused"
+    end
+  end
+
+  test "refuses the IPv6 ranges that are not for reaching anyone" do
+    for host <- ["::1", "::", "fe80::1", "fec0::1", "fd00::1", "100::1", "ff02::1"] do
+      assert EndpointPolicy.check("https://[#{host}]/v1/embeddings") ==
+               {:error, :embedding_endpoint_forbidden},
+             "expected #{host} to be refused"
+    end
+  end
+
+  test "refuses the reserved IPv4 ranges that are not private but are not hosts either" do
+    for host <- ["192.0.0.170", "192.88.99.1", "198.18.0.1", "198.19.255.1", "240.0.0.1"] do
+      assert EndpointPolicy.check("https://#{host}/v1/embeddings") ==
+               {:error, :embedding_endpoint_forbidden},
+             "expected #{host} to be refused"
+    end
+  end
+
+  test "still allows an ordinary public address over both protocols" do
+    assert {:ok, %URI{}} = EndpointPolicy.check("https://203.0.113.10/v1/embeddings")
+    assert {:ok, %URI{}} = EndpointPolicy.check("https://[2606:4700::1111]/v1/embeddings")
+  end
 end

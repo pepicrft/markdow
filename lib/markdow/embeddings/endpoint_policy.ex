@@ -110,27 +110,50 @@ defmodule Markdow.Embeddings.EndpointPolicy do
   defp public_address?({172, b, _c, _d}) when b >= 16 and b <= 31, do: false
   defp public_address?({100, b, _c, _d}) when b >= 64 and b <= 127, do: false
   defp public_address?({0, _b, _c, _d}), do: false
+  # Protocol assignments, the deprecated 6to4 relay anycast address, and the
+  # benchmarking range, none of which name a host anyone should be reaching.
+  defp public_address?({192, 0, 0, _d}), do: false
+  defp public_address?({192, 88, 99, _d}), do: false
+  defp public_address?({198, b, _c, _d}) when b in [18, 19], do: false
   defp public_address?({a, _b, _c, _d}) when a >= 224, do: false
   defp public_address?({_a, _b, _c, _d}), do: true
 
-  # IPv6 loopback, unspecified, unique local, and link local.
+  # IPv6 loopback, unspecified, unique local, link local, site local, the
+  # discard-only prefix, and multicast.
   defp public_address?({0, 0, 0, 0, 0, 0, 0, 1}), do: false
   defp public_address?({0, 0, 0, 0, 0, 0, 0, 0}), do: false
+  defp public_address?({0x0100, 0, 0, 0, _e, _f, _g, _h}), do: false
 
   defp public_address?({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFC00 and a <= 0xFDFF,
     do: false
 
-  defp public_address?({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFE80 and a <= 0xFEBF,
+  defp public_address?({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFE80 and a <= 0xFEFF,
     do: false
 
   defp public_address?({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFF00, do: false
 
-  # An address mapping IPv4 into IPv6 is judged on the IPv4 part it carries.
-  defp public_address?({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
-    public_address?({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
-  end
+  # Every IPv6 form that carries an IPv4 address is judged on the address it
+  # carries, so loopback cannot be smuggled through in IPv6 clothing. The
+  # mapped form is the one a Linux host actually routes to IPv4; the
+  # compatible, translated, NAT64, and 6to4 forms are deprecated or need a
+  # relay, but a deny list has no business leaving them to a catch-all that
+  # answers "public".
+  defp public_address?({0, 0, 0, 0, 0, 0xFFFF, g, h}), do: public_address?(embedded_v4(g, h))
+  defp public_address?({0, 0, 0, 0, 0xFFFF, 0, g, h}), do: public_address?(embedded_v4(g, h))
+  defp public_address?({0x64, 0xFF9B, 0, 0, 0, 0, g, h}), do: public_address?(embedded_v4(g, h))
+
+  defp public_address?({0x64, 0xFF9B, 1, _d, _e, _f, g, h}),
+    do: public_address?(embedded_v4(g, h))
+
+  defp public_address?({0x2002, g, h, _d, _e, _f, _g, _h}), do: public_address?(embedded_v4(g, h))
+
+  # Anything else in ::/96 is the deprecated IPv4-compatible form. The
+  # unspecified and loopback addresses were already answered above.
+  defp public_address?({0, 0, 0, 0, 0, 0, g, h}), do: public_address?(embedded_v4(g, h))
 
   defp public_address?({_a, _b, _c, _d, _e, _f, _g, _h}), do: true
 
   defp public_address?(_address), do: false
+
+  defp embedded_v4(g, h), do: {div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)}
 end
