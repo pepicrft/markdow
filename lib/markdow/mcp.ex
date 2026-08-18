@@ -113,6 +113,7 @@ defmodule Markdow.MCP do
     })
   end
 
+  defp error_text(%Ecto.Changeset{}), do: "invalid_arguments"
   defp error_text(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp error_text(_reason), do: "operation_failed"
 

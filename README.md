@@ -7,7 +7,7 @@ Markdow is a headless Markdown note service for editors and agents. Markdown fil
 - Multiple isolated vaults for each user.
 - The same operations through an [OpenAPI](https://www.openapis.org/)-described web interface and a [Model Context Protocol](https://modelcontextprotocol.io/) server.
 - Agent registration through the [auth.md protocol](https://workos.com/auth-md).
-- Encrypted OpenAI embedding provider tokens that are never returned by the service.
+- Per-account embedding configuration, where each account brings its own endpoint speaking the OpenAI protocol, and credentials are encrypted and never returned by the service.
 - Safe migration of complete Obsidian vaults, including attachments and configuration files.
 
 ## Run locally 🚀

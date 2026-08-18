@@ -74,14 +74,14 @@ defmodule MarkdowWeb.Router do
     post "/vaults/:vault_id/notes/import", IndexController, :import
     post "/vaults/:vault_id/index/rebuild", IndexController, :rebuild
     get "/vaults/:vault_id/documents", DocumentController, :index
-    get "/vaults/:vault_id/embedding-configuration", EmbeddingController, :show
-    put "/vaults/:vault_id/embedding-configuration", EmbeddingController, :update
+    get "/users/:user_id/embedding-configuration", EmbeddingController, :show
+    put "/users/:user_id/embedding-configuration", EmbeddingController, :update
 
-    post "/vaults/:vault_id/embedding-configuration/validate",
+    post "/users/:user_id/embedding-configuration/validate",
          EmbeddingController,
          :validate
 
-    delete "/vaults/:vault_id/embedding-configuration", EmbeddingController, :delete
+    delete "/users/:user_id/embedding-configuration", EmbeddingController, :delete
     post "/vaults/:vault_id/embeddings", EmbeddingController, :embed
   end
 

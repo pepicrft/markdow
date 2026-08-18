@@ -214,14 +214,31 @@ defmodule MarkdowWeb.McpTest do
   test "configures and validates a bring-your-own embedding credential through tools", %{
     index: index
   } do
+    # Configuring embeds before it stores, so the tool call needs a provider.
+    expect(OpenAI, :embed, fn configuration, "mcp-provider-token", input ->
+      assert configuration.user_id == "local"
+      assert input =~ "Validate"
+
+      {:ok,
+       %{
+         embedding: [0.1, 0.2],
+         model: "text-embedding-3-small",
+         usage: %{"total_tokens" => 5}
+       }}
+    end)
+
     configured =
       call_tool(index, 1, "configure_embedding", %{
-        "vault_id" => "default",
+        "user_id" => "local",
+        # An address literal, so the endpoint policy consults no name server.
+        "endpoint" => "https://203.0.113.10/v1/embeddings",
         "model" => "text-embedding-3-small",
         "dimensions" => 2,
         "token" => "mcp-provider-token"
       })
 
+    assert configured["user_id"] == "local"
+    assert configured["endpoint"] == "https://203.0.113.10/v1/embeddings"
     assert configured["credential_hint"] == "••••oken"
     refute JSON.encode!(configured) =~ "mcp-provider-token"
 
@@ -238,8 +255,33 @@ defmodule MarkdowWeb.McpTest do
 
     assert %{"status" => "valid", "dimensions" => 2} =
              call_tool(index, 2, "validate_embedding_configuration", %{
-               "vault_id" => "default"
+               "user_id" => "local"
              })
+  end
+
+  test "refuses an embedding endpoint aimed at an internal address through tools", %{
+    index: index
+  } do
+    # No provider expectation: the address is refused before any request.
+    result =
+      index
+      |> mcp(%{
+        "jsonrpc" => "2.0",
+        "id" => 1,
+        "method" => "tools/call",
+        "params" => %{
+          "name" => "configure_embedding",
+          "arguments" => %{
+            "user_id" => "local",
+            "endpoint" => "http://bifrost.bifrost.svc.cluster.local:8080/v1/embeddings",
+            "model" => "text-embedding-3-small",
+            "token" => "mcp-provider-token"
+          }
+        }
+      })
+      |> json_response()
+
+    assert result["result"]["isError"]
   end
 
   test "handles lifecycle requests, notifications, and protocol errors", %{index: index} do

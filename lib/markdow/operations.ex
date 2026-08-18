@@ -248,43 +248,44 @@ defmodule Markdow.Operations do
       },
       %{
         name: "get_embedding_configuration",
-        description: "Read the redacted embedding provider configuration for a vault.",
+        description: "Read the redacted embedding configuration for an account.",
         scope: "embeddings:read",
-        inputSchema: object_schema(%{"vault_id" => string_schema()}, ["vault_id"]),
+        inputSchema: object_schema(%{"user_id" => string_schema()}, ["user_id"]),
         annotations: %{readOnlyHint: true}
       },
       %{
         name: "configure_embedding",
         description:
-          "Configure an OpenAI embedding model and encrypted bring-your-own credential for a vault.",
+          "Configure the embeddings endpoint, model, and encrypted credential for an account. The endpoint must speak the OpenAI embeddings protocol over https and must not resolve to a private address. Nothing is stored until a real embedding request succeeds. Creating a configuration needs endpoint, model, and token; updating one may send any subset, and the stored credential is kept when token is omitted.",
         scope: "embeddings:write",
         inputSchema:
           object_schema(
             %{
-              "vault_id" => string_schema(),
-              "provider" => enum_schema(["openai"]),
+              "user_id" => string_schema(),
+              "endpoint" => string_schema(),
               "model" => string_schema(),
               "dimensions" => integer_schema(1, 10_000),
               "token" => string_schema()
             },
-            ["vault_id", "token"]
+            ["user_id"]
           ),
         annotations: %{idempotentHint: true}
       },
       %{
         name: "validate_embedding_configuration",
         description:
-          "Make a minimal embedding request to validate a vault's model and credential.",
+          "Make a minimal embedding request to check an account's endpoint, model, and credential.",
         scope: "embeddings:write",
         inputSchema:
-          object_schema(%{"vault_id" => string_schema(), "token" => string_schema()}, [
-            "vault_id"
+          object_schema(%{"user_id" => string_schema(), "token" => string_schema()}, [
+            "user_id"
           ]),
         annotations: %{idempotentHint: true}
       },
       %{
         name: "embed_text",
-        description: "Embed text with a vault's model and user-supplied provider credential.",
+        description:
+          "Embed text for a vault using the configuration of the account that owns it.",
         scope: "embeddings:write",
         inputSchema:
           object_schema(
@@ -299,10 +300,9 @@ defmodule Markdow.Operations do
       },
       %{
         name: "delete_embedding_configuration",
-        description:
-          "Delete a vault's embedding provider configuration and encrypted credential.",
+        description: "Delete an account's embedding configuration and encrypted credential.",
         scope: "embeddings:write",
-        inputSchema: object_schema(%{"vault_id" => string_schema()}, ["vault_id"]),
+        inputSchema: object_schema(%{"user_id" => string_schema()}, ["user_id"]),
         annotations: %{destructiveHint: true}
       }
     ]
@@ -427,24 +427,22 @@ defmodule Markdow.Operations do
          do: {:ok, %{vault_id: vault_id, path: path, deleted: true}}
   end
 
-  def call("get_embedding_configuration", %{"vault_id" => vault_id}, index),
-    do: Embeddings.get_configuration(index, vault_id)
+  def call("get_embedding_configuration", %{"user_id" => user_id}, index),
+    do: Embeddings.get_configuration(index, user_id)
 
-  def call(
-        "configure_embedding",
-        %{"vault_id" => vault_id, "token" => _token} = arguments,
-        index
-      ),
-      do: Embeddings.put_configuration(index, vault_id, Map.delete(arguments, "vault_id"))
+  # The token is optional: an account updating only its model or endpoint keeps
+  # the credential it already stored.
+  def call("configure_embedding", %{"user_id" => user_id} = arguments, index),
+    do: Embeddings.put_configuration(index, user_id, Map.delete(arguments, "user_id"))
 
-  def call("validate_embedding_configuration", %{"vault_id" => vault_id} = arguments, index),
-    do: Embeddings.validate_configuration(index, vault_id, Map.get(arguments, "token"))
+  def call("validate_embedding_configuration", %{"user_id" => user_id} = arguments, index),
+    do: Embeddings.validate_configuration(index, user_id, Map.get(arguments, "token"))
 
   def call("embed_text", %{"vault_id" => vault_id, "input" => input} = arguments, index),
     do: Embeddings.embed(index, vault_id, input, Map.get(arguments, "token"))
 
-  def call("delete_embedding_configuration", %{"vault_id" => vault_id}, index),
-    do: Embeddings.delete_configuration(index, vault_id)
+  def call("delete_embedding_configuration", %{"user_id" => user_id}, index),
+    do: Embeddings.delete_configuration(index, user_id)
 
   def call(name, _arguments, _index) when is_binary(name) do
     if name in names(), do: {:error, :invalid_arguments}, else: {:error, :unknown_operation}
@@ -501,6 +499,20 @@ defmodule Markdow.Operations do
 
   defp authorize_arguments("get_vault", %{"id" => vault_id}, index, authorization),
     do: authorize_vault(vault_id, index, authorization)
+
+  # Named rather than matched on the shape of the arguments. A clause matching
+  # any map that merely carries a "user_id" would also catch the vault-scoped
+  # operations, and a caller adding that key to a vault-scoped call would then
+  # be checked against an account it already owns while the vault went
+  # unchecked.
+  defp authorize_arguments(name, %{"user_id" => user_id}, _index, authorization)
+       when name in [
+              "get_embedding_configuration",
+              "configure_embedding",
+              "validate_embedding_configuration",
+              "delete_embedding_configuration"
+            ],
+       do: authorize_user(user_id, authorization)
 
   defp authorize_arguments(_name, %{"vault_id" => vault_id}, index, authorization),
     do: authorize_vault(vault_id, index, authorization)
@@ -593,6 +605,4 @@ defmodule Markdow.Operations do
 
   defp integer_schema(minimum, maximum),
     do: %{type: "integer", minimum: minimum, maximum: maximum}
-
-  defp enum_schema(values), do: %{type: "string", enum: values}
 end

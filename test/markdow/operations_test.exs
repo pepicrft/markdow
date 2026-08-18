@@ -1,6 +1,7 @@
 defmodule Markdow.OperationsTest do
   use Markdow.DataCase, async: true
 
+  alias Markdow.Accounts
   alias Markdow.Index
   alias Markdow.Operations
 
@@ -349,5 +350,82 @@ defmodule Markdow.OperationsTest do
              index,
              authorization
            ) == {:error, :forbidden}
+  end
+
+  @vault_operations ~w(
+    list_notes get_note create_note update_note delete_note search_notes
+    list_backlinks get_note_graph import_note rebuild_index list_documents
+    read_document write_document delete_document embed_text
+  )
+
+  @account_operations ~w(
+    list_vaults create_vault get_embedding_configuration configure_embedding
+    validate_embedding_configuration delete_embedding_configuration
+  )
+
+  @unscoped_operations ~w(
+    health list_users create_user revoke_agent_credentials get_user get_vault
+  )
+
+  test "every operation authorizes the resource it acts on, whatever else the arguments carry",
+       %{index: index} do
+    {:ok, attacker} = Accounts.create_user(%{"email" => "attacker@example.com"}, index.repo)
+    {:ok, victim} = Accounts.create_user(%{"email" => "victim@example.com"}, index.repo)
+
+    {:ok, attacker_vault} =
+      Accounts.create_vault(attacker.id, %{"name" => "Attacker"}, index.repo)
+
+    {:ok, victim_vault} = Accounts.create_vault(victim.id, %{"name" => "Victim"}, index.repo)
+    authorization = %{kind: :access_token, user_id: attacker.id}
+
+    # Authorization used to be chosen by the shape of the arguments, so a caller
+    # could pick which check ran by adding a key. Each call below carries every
+    # identifier at once, naming a resource it owns alongside one it does not.
+    assert Operations.call(
+             "get_user",
+             %{"id" => victim.id, "user_id" => attacker.id, "vault_id" => attacker_vault.id},
+             index,
+             authorization
+           ) == {:error, :forbidden}
+
+    assert Operations.call(
+             "get_vault",
+             %{
+               "id" => victim_vault.id,
+               "user_id" => attacker.id,
+               "vault_id" => attacker_vault.id
+             },
+             index,
+             authorization
+           ) == {:error, :forbidden}
+
+    for name <- @account_operations do
+      assert Operations.call(
+               name,
+               %{"user_id" => victim.id, "vault_id" => attacker_vault.id, "id" => attacker.id},
+               index,
+               authorization
+             ) == {:error, :forbidden},
+             name
+    end
+
+    for name <- @vault_operations do
+      assert Operations.call(
+               name,
+               %{
+                 "vault_id" => victim_vault.id,
+                 "user_id" => attacker.id,
+                 "id" => attacker_vault.id
+               },
+               index,
+               authorization
+             ) == {:error, :forbidden},
+             name
+    end
+
+    # Fails when an operation is added without being placed in one of the
+    # groups above, so a new operation cannot quietly skip this test.
+    assert MapSet.new(@unscoped_operations ++ @account_operations ++ @vault_operations) ==
+             MapSet.new(Operations.names())
   end
 end

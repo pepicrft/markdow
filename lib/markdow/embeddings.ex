@@ -1,10 +1,21 @@
 defmodule Markdow.Embeddings do
-  @moduledoc "Manages per-vault embedding provider configuration and requests."
+  @moduledoc """
+  Manages per-account embedding provider configuration and requests.
+
+  An account brings its own endpoint, model, and credential, so the deployment
+  does not choose a provider on anyone's behalf. Every vault an account owns
+  embeds through that configuration.
+
+  Writing a configuration performs a real embedding request first and stores
+  nothing unless it succeeds, so a saved configuration is one that has been
+  seen to work.
+  """
 
   import Ecto.Query
 
   alias Markdow.Accounts
   alias Markdow.Embeddings.Configuration
+  alias Markdow.Embeddings.EndpointPolicy
   alias Markdow.Index.Context
   alias Markdow.Secrets
 
@@ -12,9 +23,9 @@ defmodule Markdow.Embeddings do
   @maximum_input_bytes 100_000
 
   @spec get_configuration(Context.t(), String.t()) :: {:ok, map()} | {:error, atom()}
-  def get_configuration(%Context{} = index, vault_id) do
-    with {:ok, _vault} <- Accounts.get_vault(vault_id, index.repo),
-         %Configuration{} = configuration <- index.repo.get(Configuration, vault_id) do
+  def get_configuration(%Context{} = index, user_id) do
+    with {:ok, _user} <- Accounts.get_user(user_id, index.repo),
+         %Configuration{} = configuration <- index.repo.get(Configuration, user_id) do
       {:ok, public_configuration(configuration)}
     else
       nil -> {:error, :embedding_not_configured}
@@ -22,72 +33,65 @@ defmodule Markdow.Embeddings do
     end
   end
 
-  @spec put_configuration(Context.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def put_configuration(%Context{} = index, vault_id, attrs) when is_map(attrs) do
-    with {:ok, _vault} <- Accounts.get_vault(vault_id, index.repo),
-         existing = index.repo.get(Configuration, vault_id),
-         {:ok, secret_attrs} <- secret_attrs(index, vault_id, existing, Map.get(attrs, "token")) do
-      configuration_attrs = %{
-        vault_id: vault_id,
-        provider: Map.get(attrs, "provider", "openai"),
-        model: Map.get(attrs, "model", "text-embedding-3-small"),
-        dimensions: Map.get(attrs, "dimensions"),
-        validated_at: nil
-      }
+  @doc """
+  Stores a configuration, but only once it has produced an embedding.
 
-      %Configuration{vault_id: vault_id}
-      |> Configuration.changeset(Map.merge(configuration_attrs, secret_attrs))
-      |> index.repo.insert(
-        conflict_target: :vault_id,
-        on_conflict:
-          {:replace,
-           [
-             :provider,
-             :model,
-             :dimensions,
-             :token_ciphertext,
-             :token_iv,
-             :token_tag,
-             :token_suffix,
-             :validated_at,
-             :updated_at
-           ]}
-      )
-      |> map_configuration()
+  The candidate is assembled and exercised before anything is written, so a
+  failing endpoint, model, or credential leaves any previous configuration
+  untouched rather than replacing a working one with a broken one.
+  """
+  @spec put_configuration(Context.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def put_configuration(%Context{} = index, user_id, attrs) when is_map(attrs) do
+    existing = index.repo.get(Configuration, user_id)
+
+    supplied = Map.get(attrs, "token")
+
+    with {:ok, _user} <- Accounts.get_user(user_id, index.repo),
+         {:ok, token} <- token(existing, index, user_id, supplied),
+         {:ok, candidate} <- candidate(user_id, existing, attrs),
+         {:ok, secret_attrs} <- secret_attrs(index, user_id, existing, supplied),
+         {:ok, _result} <- request(index, candidate, token, @validation_input),
+         {:ok, stored} <- store(index, user_id, candidate, secret_attrs, supplied) do
+      {:ok, public_configuration(stored)}
     end
   end
 
   @spec validate_configuration(Context.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
-  def validate_configuration(%Context{} = index, vault_id, token_override \\ nil) do
-    with {:ok, configuration} <- configuration(index, vault_id),
+  def validate_configuration(%Context{} = index, user_id, token_override \\ nil) do
+    with {:ok, configuration} <- configuration(index, user_id),
          {:ok, token} <- credential(index, configuration, token_override),
-         {:ok, result} <- index.embedding_client.embed(configuration, token, @validation_input),
+         {:ok, result} <- request(index, configuration, token, @validation_input),
          {:ok, updated} <- validated(index, configuration) do
       {:ok,
        %{
          status: "valid",
-         vault_id: vault_id,
-         provider: updated.provider,
+         user_id: user_id,
+         endpoint: updated.endpoint,
          model: result.model,
          dimensions: length(result.embedding)
        }}
     end
   end
 
+  @doc """
+  Embeds text for a vault using the configuration of the account that owns it.
+  """
   @spec embed(Context.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
   def embed(index, vault_id, input, token_override \\ nil)
 
   def embed(%Context{} = index, vault_id, input, token_override)
       when is_binary(input) and byte_size(input) > 0 and byte_size(input) <= @maximum_input_bytes do
-    with {:ok, configuration} <- configuration(index, vault_id),
+    with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo),
+         {:ok, configuration} <- configuration(index, vault.user_id),
          {:ok, token} <- credential(index, configuration, token_override),
-         {:ok, result} <- index.embedding_client.embed(configuration, token, input) do
+         {:ok, result} <- request(index, configuration, token, input) do
       {:ok,
        %{
          vault_id: vault_id,
-         provider: configuration.provider,
+         user_id: vault.user_id,
+         endpoint: configuration.endpoint,
          model: result.model,
          embedding: result.embedding,
          dimensions: length(result.embedding),
@@ -100,31 +104,160 @@ defmodule Markdow.Embeddings do
     do: {:error, :invalid_embedding_input}
 
   @spec delete_configuration(Context.t(), String.t()) :: {:ok, map()} | {:error, atom()}
-  def delete_configuration(%Context{} = index, vault_id) do
+  def delete_configuration(%Context{} = index, user_id) do
     case index.repo.delete_all(
-           from(configuration in Configuration, where: configuration.vault_id == ^vault_id)
+           from(configuration in Configuration, where: configuration.user_id == ^user_id)
          ) do
       {0, _records} -> {:error, :embedding_not_configured}
-      {_count, _records} -> {:ok, %{vault_id: vault_id, deleted: true}}
+      {_count, _records} -> {:ok, %{user_id: user_id, deleted: true}}
     end
   end
 
-  defp configuration(index, vault_id) do
-    with {:ok, _vault} <- Accounts.get_vault(vault_id, index.repo) do
-      case index.repo.get(Configuration, vault_id) do
-        nil -> {:error, :embedding_not_configured}
-        configuration -> {:ok, configuration}
+  # The address is re-checked here rather than trusting what was stored,
+  # because the name in a saved configuration can be repointed at an internal
+  # address after it was accepted.
+  defp request(index, configuration, token, input) do
+    with {:ok, _uri} <- EndpointPolicy.check(configuration.endpoint) do
+      index.embedding_client.embed(configuration, token, input)
+    end
+  end
+
+  defp configuration(index, user_id) do
+    case index.repo.get(Configuration, user_id) do
+      nil -> {:error, :embedding_not_configured}
+      configuration -> {:ok, configuration}
+    end
+  end
+
+  defp candidate(user_id, existing, attrs) do
+    endpoint = Map.get(attrs, "endpoint") || endpoint_of(existing)
+    model = Map.get(attrs, "model") || model_of(existing)
+
+    dimensions =
+      if Map.has_key?(attrs, "dimensions"),
+        do: Map.get(attrs, "dimensions"),
+        else: dimensions_of(existing)
+
+    if is_binary(endpoint) and is_binary(model) do
+      {:ok,
+       %Configuration{
+         user_id: user_id,
+         endpoint: endpoint,
+         model: model,
+         dimensions: dimensions
+       }}
+    else
+      {:error, :invalid_arguments}
+    end
+  end
+
+  defp endpoint_of(%Configuration{endpoint: endpoint}), do: endpoint
+  defp endpoint_of(_existing), do: nil
+
+  defp model_of(%Configuration{model: model}), do: model
+  defp model_of(_existing), do: nil
+
+  defp dimensions_of(%Configuration{dimensions: dimensions}), do: dimensions
+  defp dimensions_of(_existing), do: nil
+
+  defp store(index, user_id, candidate, secret_attrs, supplied) do
+    attrs =
+      %{
+        user_id: user_id,
+        endpoint: candidate.endpoint,
+        model: candidate.model,
+        dimensions: candidate.dimensions,
+        validated_at: DateTime.utc_now()
+      }
+      |> Map.merge(secret_attrs)
+
+    changeset = Configuration.changeset(%Configuration{user_id: user_id}, attrs)
+
+    if is_binary(supplied) and supplied != "" do
+      insert(index, changeset)
+    else
+      update(index, user_id, changeset, secret_attrs)
+    end
+  end
+
+  # A write carrying a credential owns the whole row. It may create the
+  # configuration, and replacing every column keeps the endpoint and the
+  # credential the pair that was just validated together.
+  #
+  # `returning: true` makes the database supply the stored row, so a caller is
+  # told the real creation time rather than the one this insert proposed and the
+  # conflict clause discarded.
+  defp insert(index, changeset) do
+    index.repo.insert(changeset,
+      conflict_target: :user_id,
+      on_conflict:
+        {:replace,
+         [
+           :endpoint,
+           :model,
+           :dimensions,
+           :token_ciphertext,
+           :token_iv,
+           :token_tag,
+           :token_suffix,
+           :validated_at,
+           :updated_at
+         ]},
+      returning: true
+    )
+  end
+
+  # A write with no credential is an update of the row whose credential was used
+  # to validate it, so it is applied only while that row still holds that
+  # credential. An upsert here would resurrect a configuration deleted while the
+  # provider call was in flight, and would pair its endpoint with whatever
+  # credential arrived in the meantime, which is a pair nothing ever validated.
+  #
+  # Validating through the changeset first keeps the column rules that
+  # `update_all` would otherwise walk straight past.
+  defp update(index, user_id, changeset, secret_attrs) do
+    with {:ok, validated} <- Ecto.Changeset.apply_action(changeset, :update) do
+      query =
+        from(configuration in Configuration,
+          where: configuration.user_id == ^user_id,
+          where: configuration.token_ciphertext == ^secret_attrs.token_ciphertext,
+          select: configuration
+        )
+
+      case index.repo.update_all(query,
+             set: [
+               endpoint: validated.endpoint,
+               model: validated.model,
+               dimensions: validated.dimensions,
+               validated_at: validated.validated_at,
+               updated_at: DateTime.utc_now()
+             ]
+           ) do
+        {1, [stored]} -> {:ok, stored}
+        {0, _rows} -> {:error, :embedding_configuration_changed}
       end
     end
   end
 
-  defp secret_attrs(index, vault_id, nil, token) when is_binary(token) and byte_size(token) > 0 do
-    with {:ok, encrypted} <- Secrets.encrypt(token, index.embedding_secret_key, vault_id) do
+  defp token(existing, index, user_id, supplied)
+
+  defp token(_existing, _index, _user_id, supplied)
+       when is_binary(supplied) and byte_size(supplied) > 0,
+       do: {:ok, supplied}
+
+  defp token(%Configuration{} = existing, index, user_id, nil),
+    do: Secrets.decrypt(existing, index.embedding_secret_key, user_id)
+
+  defp token(_existing, _index, _user_id, _supplied), do: {:error, :invalid_arguments}
+
+  defp secret_attrs(index, user_id, _existing, token)
+       when is_binary(token) and byte_size(token) > 0 do
+    with {:ok, encrypted} <- Secrets.encrypt(token, index.embedding_secret_key, user_id) do
       {:ok, Map.put(encrypted, :token_suffix, token_suffix(token))}
     end
   end
 
-  defp secret_attrs(_index, _vault_id, %Configuration{} = existing, nil) do
+  defp secret_attrs(_index, _user_id, %Configuration{} = existing, nil) do
     {:ok,
      Map.take(existing, [
        :token_ciphertext,
@@ -134,13 +267,13 @@ defmodule Markdow.Embeddings do
      ])}
   end
 
-  defp secret_attrs(_index, _vault_id, _existing, _token), do: {:error, :invalid_arguments}
+  defp secret_attrs(_index, _user_id, _existing, _token), do: {:error, :invalid_arguments}
 
   defp credential(_index, _configuration, token) when is_binary(token) and byte_size(token) > 0,
     do: {:ok, token}
 
   defp credential(index, configuration, nil),
-    do: Secrets.decrypt(configuration, index.embedding_secret_key, configuration.vault_id)
+    do: Secrets.decrypt(configuration, index.embedding_secret_key, configuration.user_id)
 
   defp credential(_index, _configuration, _token), do: {:error, :invalid_arguments}
 
@@ -150,13 +283,10 @@ defmodule Markdow.Embeddings do
     |> index.repo.update()
   end
 
-  defp map_configuration({:ok, configuration}), do: {:ok, public_configuration(configuration)}
-  defp map_configuration({:error, reason}), do: {:error, reason}
-
   defp public_configuration(configuration) do
     %{
-      vault_id: configuration.vault_id,
-      provider: configuration.provider,
+      user_id: configuration.user_id,
+      endpoint: configuration.endpoint,
       model: configuration.model,
       dimensions: configuration.dimensions,
       credential_hint: "••••#{configuration.token_suffix}",
