@@ -160,13 +160,6 @@ defmodule Markdow.Embeddings do
   defp dimensions_of(%Configuration{dimensions: dimensions}), do: dimensions
   defp dimensions_of(_existing), do: nil
 
-  # An update that does not carry a new credential must not write the credential
-  # columns at all. Writing back the values read at the start would undo a
-  # credential another request changed while the provider call was in flight.
-  #
-  # `returning: true` makes the database supply the stored row, so a caller is
-  # told the real creation time rather than the one this insert proposed and the
-  # conflict clause discarded.
   defp store(index, user_id, candidate, secret_attrs, supplied) do
     attrs =
       %{
@@ -178,30 +171,72 @@ defmodule Markdow.Embeddings do
       }
       |> Map.merge(secret_attrs)
 
-    replaced =
-      if is_binary(supplied) and supplied != "" do
-        [
-          :endpoint,
-          :model,
-          :dimensions,
-          :token_ciphertext,
-          :token_iv,
-          :token_tag,
-          :token_suffix,
-          :validated_at,
-          :updated_at
-        ]
-      else
-        [:endpoint, :model, :dimensions, :validated_at, :updated_at]
-      end
+    changeset = Configuration.changeset(%Configuration{user_id: user_id}, attrs)
 
-    %Configuration{user_id: user_id}
-    |> Configuration.changeset(attrs)
-    |> index.repo.insert(
+    if is_binary(supplied) and supplied != "" do
+      insert(index, changeset)
+    else
+      update(index, user_id, changeset, secret_attrs)
+    end
+  end
+
+  # A write carrying a credential owns the whole row. It may create the
+  # configuration, and replacing every column keeps the endpoint and the
+  # credential the pair that was just validated together.
+  #
+  # `returning: true` makes the database supply the stored row, so a caller is
+  # told the real creation time rather than the one this insert proposed and the
+  # conflict clause discarded.
+  defp insert(index, changeset) do
+    index.repo.insert(changeset,
       conflict_target: :user_id,
-      on_conflict: {:replace, replaced},
+      on_conflict:
+        {:replace,
+         [
+           :endpoint,
+           :model,
+           :dimensions,
+           :token_ciphertext,
+           :token_iv,
+           :token_tag,
+           :token_suffix,
+           :validated_at,
+           :updated_at
+         ]},
       returning: true
     )
+  end
+
+  # A write with no credential is an update of the row whose credential was used
+  # to validate it, so it is applied only while that row still holds that
+  # credential. An upsert here would resurrect a configuration deleted while the
+  # provider call was in flight, and would pair its endpoint with whatever
+  # credential arrived in the meantime, which is a pair nothing ever validated.
+  #
+  # Validating through the changeset first keeps the column rules that
+  # `update_all` would otherwise walk straight past.
+  defp update(index, user_id, changeset, secret_attrs) do
+    with {:ok, validated} <- Ecto.Changeset.apply_action(changeset, :update) do
+      query =
+        from(configuration in Configuration,
+          where: configuration.user_id == ^user_id,
+          where: configuration.token_ciphertext == ^secret_attrs.token_ciphertext,
+          select: configuration
+        )
+
+      case index.repo.update_all(query,
+             set: [
+               endpoint: validated.endpoint,
+               model: validated.model,
+               dimensions: validated.dimensions,
+               validated_at: validated.validated_at,
+               updated_at: DateTime.utc_now()
+             ]
+           ) do
+        {1, [stored]} -> {:ok, stored}
+        {0, _rows} -> {:error, :embedding_configuration_changed}
+      end
+    end
   end
 
   defp token(existing, index, user_id, supplied)

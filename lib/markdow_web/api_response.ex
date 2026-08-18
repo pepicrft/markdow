@@ -43,6 +43,10 @@ defmodule MarkdowWeb.ApiResponse do
     conn |> put_status(422) |> json(%{error: to_string(reason)})
   end
 
+  def send_result(conn, {:error, :embedding_configuration_changed}, _success_status) do
+    conn |> put_status(409) |> json(%{error: "embedding_configuration_changed"})
+  end
+
   def send_result(conn, {:error, :document_too_large}, _success_status) do
     conn |> put_status(413) |> json(%{error: "document_too_large"})
   end

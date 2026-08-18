@@ -224,10 +224,10 @@ defmodule Markdow.EmbeddingsTest do
            ) == {:error, :forbidden}
   end
 
-  test "keeps the newest credential when a slow update omits the token", %{index: index} do
+  test "refuses a token-omitting update whose credential changed underneath it", %{index: index} do
     index = %{index | embedding_client: StubClient}
 
-    {:ok, initial} =
+    {:ok, _initial} =
       Embeddings.put_configuration(index, @user, %{
         "endpoint" => @endpoint,
         "model" => "initial",
@@ -257,18 +257,99 @@ defmodule Markdow.EmbeddingsTest do
              })
 
     send(slow_pid, :release)
-    assert {:ok, slow_result} = Task.await(slow)
 
-    # An update carrying no token must not write the credential columns, or it
-    # would put back the credential it read before the other write landed.
+    # Storing this would pair the slow update's model with a credential it was
+    # never validated against. Refusing keeps the promise that a stored
+    # configuration is one that has been seen to work.
+    assert Task.await(slow) == {:error, :embedding_configuration_changed}
+
     stored = Repo.get!(Configuration, @user)
-    assert {:ok, final_token} = Secrets.decrypt(stored, index.embedding_secret_key, @user)
-    assert final_token == "new-token"
-    assert stored.model == slow_result.model
+    assert stored.model == "fast"
+    assert {:ok, "new-token"} = Secrets.decrypt(stored, index.embedding_secret_key, @user)
+  end
 
-    # The creation time reported is the stored one, not the one this write
-    # proposed and the conflict clause discarded.
-    assert slow_result.created_at == initial.created_at
+  test "does not resurrect a configuration deleted while an update was in flight", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, _initial} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "initial",
+        "token" => "old-token"
+      })
+
+    encoded_parent = self() |> :erlang.term_to_binary() |> Base.url_encode64(padding: false)
+
+    slow =
+      Task.async(fn ->
+        receive do
+          :go ->
+            Embeddings.put_configuration(index, @user, %{"model" => "slow:" <> encoded_parent})
+        end
+      end)
+
+    Sandbox.allow(Repo, self(), slow.pid)
+    send(slow.pid, :go)
+    assert_receive {:slow_candidate_ready, slow_pid, "old-token"}
+
+    # Revoking the credential has to be final. An upsert here would bring the
+    # deleted row, and the credential it carried, straight back.
+    assert {:ok, %{deleted: true}} = Embeddings.delete_configuration(index, @user)
+
+    send(slow_pid, :release)
+    assert Task.await(slow) == {:error, :embedding_configuration_changed}
+    assert Repo.get(Configuration, @user) == nil
+  end
+
+  test "reports the stored timestamps rather than the ones a write proposed", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, inserted} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "initial",
+        "token" => "old-token"
+      })
+
+    row = Repo.get!(Configuration, @user)
+    assert inserted.created_at == row.inserted_at
+
+    assert {:ok, updated} = Embeddings.put_configuration(index, @user, %{"model" => "updated"})
+    assert updated.created_at == row.inserted_at
+    assert updated.updated_at == Repo.get!(Configuration, @user).updated_at
+  end
+
+  test "an update still has to satisfy the column rules", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, _initial} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "initial",
+        "token" => "old-token"
+      })
+
+    # The credential-omitting path writes through update_all, which walks past
+    # the changeset unless it is asked first.
+    assert {:error, %Ecto.Changeset{}} =
+             Embeddings.put_configuration(index, @user, %{"model" => ""})
+
+    assert Repo.get!(Configuration, @user).model == "initial"
+  end
+
+  test "refuses a partial write when no configuration exists", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    for attrs <- [
+          %{},
+          %{"endpoint" => @endpoint},
+          %{"model" => "model"},
+          %{"endpoint" => @endpoint, "model" => "model"},
+          %{"endpoint" => @endpoint, "model" => "model", "token" => ""}
+        ] do
+      assert Embeddings.put_configuration(index, @user, attrs) == {:error, :invalid_arguments}
+      assert Repo.get(Configuration, @user) == nil
+    end
   end
 
   test "updates the model without resending the credential", %{index: index} do
