@@ -97,4 +97,62 @@ defmodule Markdow.Embeddings.OpenAITest do
     assert {:ok, result} = OpenAI.embed(configuration, "virtual-key", "Text to embed")
     assert result.embedding == [0.5, 0.6]
   end
+
+  test "sends the credential in the configured header, on its own" do
+    expect(Finch, :request, fn request, Markdow.Finch, _options ->
+      # A gateway reading its key from a header of its own wants the key
+      # unadorned, and wants authorization left free for the caller's identity.
+      assert {"x-bf-vk", "virtual-key"} in request.headers
+      refute List.keymember?(request.headers, "authorization", 0)
+
+      {:ok,
+       %Finch.Response{
+         status: 200,
+         body:
+           JSON.encode!(%{
+             data: [%{embedding: [0.7], index: 0, object: "embedding"}],
+             model: "accounts/fireworks/models/qwen3-embedding-8b",
+             object: "list",
+             usage: %{prompt_tokens: 2, total_tokens: 2}
+           })
+       }}
+    end)
+
+    configuration = %Configuration{
+      user_id: "usr_test",
+      endpoint: "https://llm.example.com/v1/embeddings",
+      model: "accounts/fireworks/models/qwen3-embedding-8b",
+      credential_header: "x-bf-vk"
+    }
+
+    assert {:ok, result} = OpenAI.embed(configuration, "virtual-key", "Text to embed")
+    assert result.embedding == [0.7]
+  end
+
+  test "keeps the bearer scheme when the configured header is authorization" do
+    expect(Finch, :request, fn request, Markdow.Finch, _options ->
+      assert {"authorization", "Bearer provider-token"} in request.headers
+
+      {:ok,
+       %Finch.Response{
+         status: 200,
+         body:
+           JSON.encode!(%{
+             data: [%{embedding: [0.8], index: 0, object: "embedding"}],
+             model: "text-embedding-3-small",
+             object: "list",
+             usage: %{}
+           })
+       }}
+    end)
+
+    configuration = %Configuration{
+      user_id: "usr_test",
+      endpoint: "https://api.openai.com/v1/embeddings",
+      model: "text-embedding-3-small",
+      credential_header: "authorization"
+    }
+
+    assert {:ok, _result} = OpenAI.embed(configuration, "provider-token", "Text to embed")
+  end
 end

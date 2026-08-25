@@ -376,6 +376,110 @@ defmodule Markdow.EmbeddingsTest do
     assert {:ok, "old-token"} = Secrets.decrypt(stored, index.embedding_secret_key, @user)
   end
 
+  test "exercises a configured credential header before storing it", %{index: index} do
+    expect(OpenAI, :embed, fn configuration, _token, _input ->
+      # The candidate carries the header the stored row will carry, so the
+      # request that decides whether to store is the request that will be made.
+      assert configuration.credential_header == "x-bf-vk"
+      {:ok, %{embedding: [0.1], model: "gateway-model", usage: %{}}}
+    end)
+
+    assert {:ok, configured} =
+             Embeddings.put_configuration(index, @user, %{
+               "endpoint" => @endpoint,
+               "model" => "gateway-model",
+               "credential_header" => "X-BF-VK",
+               "token" => "virtual-key"
+             })
+
+    # One header, one spelling, whichever spelling arrived.
+    assert configured.credential_header == "x-bf-vk"
+    assert Repo.get!(Configuration, @user).credential_header == "x-bf-vk"
+  end
+
+  test "reports the default header for a configuration that never named one", %{index: index} do
+    configure(index)
+
+    assert {:ok, configuration} = Embeddings.get_configuration(index, @user)
+    assert configuration.credential_header == "authorization"
+    assert is_nil(Repo.get!(Configuration, @user).credential_header)
+  end
+
+  test "keeps the stored header when a later write leaves it out", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, _initial} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "initial",
+        "credential_header" => "x-bf-vk",
+        "token" => "virtual-key"
+      })
+
+    assert {:ok, updated} =
+             Embeddings.put_configuration(index, @user, %{"model" => "updated"})
+
+    assert updated.model == "updated"
+    assert updated.credential_header == "x-bf-vk"
+  end
+
+  test "goes back to a bearer token when a write names authorization", %{index: index} do
+    index = %{index | embedding_client: StubClient}
+
+    {:ok, _initial} =
+      Embeddings.put_configuration(index, @user, %{
+        "endpoint" => @endpoint,
+        "model" => "gateway-model",
+        "credential_header" => "x-bf-vk",
+        "token" => "virtual-key"
+      })
+
+    assert {:ok, updated} =
+             Embeddings.put_configuration(index, @user, %{"credential_header" => "authorization"})
+
+    assert updated.credential_header == "authorization"
+
+    assert Configuration.credential_header(Repo.get!(Configuration, @user), "virtual-key") ==
+             {"authorization", "Bearer virtual-key"}
+  end
+
+  test "refuses a credential header the request writes itself", %{index: index} do
+    # Nothing is asked of the provider, because the header never gets that far.
+    for header <- ["content-type", "Accept", "host", "content-length"] do
+      assert Embeddings.put_configuration(index, @user, %{
+               "endpoint" => @endpoint,
+               "model" => "text-embedding-3-small",
+               "credential_header" => header,
+               "token" => "virtual-key"
+             }) == {:error, :invalid_arguments}
+    end
+
+    assert is_nil(Repo.get(Configuration, @user))
+  end
+
+  test "refuses a credential header that is not a header name", %{index: index} do
+    malformed = [
+      # A newline would end the header and start one of the caller's choosing.
+      "x-bf-vk\r\nx-forwarded-for: 127.0.0.1",
+      "x bf vk",
+      ":authority",
+      "",
+      String.duplicate("x", 65),
+      42
+    ]
+
+    for header <- malformed do
+      assert Embeddings.put_configuration(index, @user, %{
+               "endpoint" => @endpoint,
+               "model" => "text-embedding-3-small",
+               "credential_header" => header,
+               "token" => "virtual-key"
+             }) == {:error, :invalid_arguments}
+    end
+
+    assert is_nil(Repo.get(Configuration, @user))
+  end
+
   defp configure(index) do
     expect(OpenAI, :embed, fn _configuration, _token, _input ->
       {:ok, %{embedding: [0.1, 0.2, 0.3], model: "text-embedding-3-small", usage: %{}}}

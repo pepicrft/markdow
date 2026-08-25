@@ -138,16 +138,25 @@ defmodule Markdow.Embeddings do
         do: Map.get(attrs, "dimensions"),
         else: dimensions_of(existing)
 
-    if is_binary(endpoint) and is_binary(model) do
+    supplied_header =
+      if Map.has_key?(attrs, "credential_header"),
+        do: Map.get(attrs, "credential_header"),
+        else: credential_header_of(existing)
+
+    # The header is cast here rather than at the changeset, so the request that
+    # exercises the candidate carries the header the stored row will carry.
+    with {:ok, credential_header} <- Configuration.cast_credential_header(supplied_header),
+         true <- is_binary(endpoint) and is_binary(model) do
       {:ok,
        %Configuration{
          user_id: user_id,
          endpoint: endpoint,
          model: model,
-         dimensions: dimensions
+         dimensions: dimensions,
+         credential_header: credential_header
        }}
     else
-      {:error, :invalid_arguments}
+      _invalid -> {:error, :invalid_arguments}
     end
   end
 
@@ -160,6 +169,9 @@ defmodule Markdow.Embeddings do
   defp dimensions_of(%Configuration{dimensions: dimensions}), do: dimensions
   defp dimensions_of(_existing), do: nil
 
+  defp credential_header_of(%Configuration{credential_header: header}), do: header
+  defp credential_header_of(_existing), do: nil
+
   defp store(index, user_id, candidate, secret_attrs, supplied) do
     attrs =
       %{
@@ -167,6 +179,7 @@ defmodule Markdow.Embeddings do
         endpoint: candidate.endpoint,
         model: candidate.model,
         dimensions: candidate.dimensions,
+        credential_header: candidate.credential_header,
         validated_at: DateTime.utc_now()
       }
       |> Map.merge(secret_attrs)
@@ -196,6 +209,7 @@ defmodule Markdow.Embeddings do
            :endpoint,
            :model,
            :dimensions,
+           :credential_header,
            :token_ciphertext,
            :token_iv,
            :token_tag,
@@ -229,6 +243,7 @@ defmodule Markdow.Embeddings do
                endpoint: validated.endpoint,
                model: validated.model,
                dimensions: validated.dimensions,
+               credential_header: validated.credential_header,
                validated_at: validated.validated_at,
                updated_at: DateTime.utc_now()
              ]
@@ -289,6 +304,7 @@ defmodule Markdow.Embeddings do
       endpoint: configuration.endpoint,
       model: configuration.model,
       dimensions: configuration.dimensions,
+      credential_header: configuration.credential_header || "authorization",
       credential_hint: "••••#{configuration.token_suffix}",
       validated_at: configuration.validated_at,
       created_at: configuration.inserted_at,

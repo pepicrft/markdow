@@ -5,10 +5,13 @@ defmodule Markdow.Embeddings.OpenAI do
 
   The address comes from the account's configuration, so each account reaches
   its own provider. A gateway that routes on a provider-qualified model wants
-  that prefix in the configured model rather than here.
+  that prefix in the configured model rather than here, and one that reads its
+  key from a header of its own names that header in the configuration.
   """
 
   @behaviour Markdow.Embeddings.Client
+
+  alias Markdow.Embeddings.Configuration
 
   @impl true
   def embed(configuration, token, input) do
@@ -21,7 +24,7 @@ defmodule Markdow.Embeddings.OpenAI do
         :post,
         configuration.endpoint,
         [
-          {"authorization", "Bearer #{token}"},
+          Configuration.credential_header(configuration, token),
           {"content-type", "application/json"},
           {"accept", "application/json"}
         ],

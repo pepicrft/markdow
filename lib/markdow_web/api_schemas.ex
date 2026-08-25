@@ -376,6 +376,11 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfiguration do
         endpoint: %OpenApiSpex.Schema{type: :string},
         model: %OpenApiSpex.Schema{type: :string},
         dimensions: %OpenApiSpex.Schema{type: :integer, nullable: true},
+        credential_header: %OpenApiSpex.Schema{
+          type: :string,
+          description: "The header the credential is sent in.",
+          example: "authorization"
+        },
         credential_hint: %OpenApiSpex.Schema{type: :string},
         validated_at: %OpenApiSpex.Schema{type: :string, nullable: true},
         created_at: %OpenApiSpex.Schema{type: :string},
@@ -385,6 +390,7 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfiguration do
         :user_id,
         :endpoint,
         :model,
+        :credential_header,
         :credential_hint,
         :created_at,
         :updated_at
@@ -412,6 +418,13 @@ defmodule MarkdowWeb.ApiSchemas.EmbeddingConfigurationInput do
         },
         model: %OpenApiSpex.Schema{type: :string, example: "text-embedding-3-small"},
         dimensions: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: 10_000},
+        credential_header: %OpenApiSpex.Schema{
+          type: :string,
+          nullable: true,
+          description:
+            "The header carrying the credential. Left unset it is authorization, which carries a bearer token; any other header carries the credential on its own, which is what a gateway reading its key from a header of its own expects.",
+          example: "x-bf-vk"
+        },
         token: %OpenApiSpex.Schema{type: :string, format: :password, writeOnly: true}
       },
       required: [],

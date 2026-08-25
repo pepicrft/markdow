@@ -256,7 +256,7 @@ defmodule Markdow.Operations do
       %{
         name: "configure_embedding",
         description:
-          "Configure the embeddings endpoint, model, and encrypted credential for an account. The endpoint must speak the OpenAI embeddings protocol over https and must not resolve to a private address. Nothing is stored until a real embedding request succeeds. Creating a configuration needs endpoint, model, and token; updating one may send any subset, and the stored credential is kept when token is omitted.",
+          "Configure the embeddings endpoint, model, and encrypted credential for an account. The endpoint must speak the OpenAI embeddings protocol over https and must not resolve to a private address. Nothing is stored until a real embedding request succeeds. Creating a configuration needs endpoint, model, and token; updating one may send any subset, and the stored credential is kept when token is omitted. The credential travels as an authorization bearer token unless credential_header names another header, in which case it is sent as that header's whole value; send \"authorization\" to go back to the default.",
         scope: "embeddings:write",
         inputSchema:
           object_schema(
@@ -265,6 +265,7 @@ defmodule Markdow.Operations do
               "endpoint" => string_schema(),
               "model" => string_schema(),
               "dimensions" => integer_schema(1, 10_000),
+              "credential_header" => string_schema(),
               "token" => string_schema()
             },
             ["user_id"]
