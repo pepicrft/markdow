@@ -119,6 +119,7 @@ defmodule MarkdowWeb.Router do
     post "/agent/event/notify", DiscoveryController, :event_notify
     post "/oauth2/token", OAuthController, :token
     post "/oauth2/revoke", OAuthController, :revoke
+    post "/oauth2/register", OAuthRegistrationController, :create
   end
 
   scope "/", MarkdowWeb do

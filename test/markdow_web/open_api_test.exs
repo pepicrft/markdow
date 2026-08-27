@@ -34,6 +34,7 @@ defmodule MarkdowWeb.OpenApiTest do
       "start_agent_claim",
       "exchange_agent_credential",
       "revoke_agent_credential",
+      "register_oauth_client",
       "get_oauth_protected_resource",
       "get_mcp_protected_resource",
       "get_oauth_authorization_server",

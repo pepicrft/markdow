@@ -286,6 +286,20 @@ config :markdow,
     path: storage_path
   ]
 
+# Tokens Boruta signs carry this as their issuer, and it has to be the origin
+# clients discovered the authorization server at or they will refuse them.
+config :boruta, Boruta.Oauth,
+  repo: Markdow.Repo,
+  contexts: [resource_owners: Markdow.OAuth.ResourceOwners],
+  issuer: default_public_origin,
+  max_ttl: [
+    authorization_code: 60,
+    access_token:
+      String.to_integer(System.get_env("MARKDOW_OAUTH_ACCESS_TOKEN_TTL_SECONDS", "3600")),
+    id_token: 3_600,
+    refresh_token: 60 * 60 * 24 * 30
+  ]
+
 if System.get_env("MARKDOW_SERVER") in ~w(true 1) or System.get_env("PHX_SERVER") in ~w(true 1) do
   config :markdow, MarkdowWeb.Endpoint, server: true
 end

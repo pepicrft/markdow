@@ -1,5 +1,17 @@
 defmodule Markdow.MCP do
-  @moduledoc "A streamable Hypertext Transfer Protocol server for Model Context Protocol clients."
+  @moduledoc """
+  A streamable Hypertext Transfer Protocol server for Model Context Protocol clients.
+
+  The server is stateless. `initialize` returns no `Mcp-Session-Id`, which is how
+  the specification says a server declares that it keeps nothing between
+  requests, and clients then send none back. Every request carries its own
+  credential and is answered on its own, so any replica can serve any request
+  and a restart costs a client nothing.
+
+  It previously emitted a random session id it never stored or checked. Clients
+  echoed it on later requests and it was ignored, which read as a session that
+  existed while nothing was actually held.
+  """
 
   @behaviour Plug
 
@@ -40,9 +52,7 @@ defmodule Markdow.MCP do
         do: requested_version,
         else: @protocol_version
 
-    conn
-    |> put_resp_header("mcp-session-id", session_id())
-    |> result(id, %{
+    result(conn, id, %{
       protocolVersion: version,
       capabilities: %{tools: %{listChanged: false}},
       serverInfo: %{name: "markdow", title: "Markdow notes", version: "0.1.0"},
@@ -155,7 +165,4 @@ defmodule Markdow.MCP do
   end
 
   defp index(conn), do: conn.private[:markdow_index] || Index.context()
-
-  defp session_id,
-    do: :crypto.strong_rand_bytes(24) |> Base.url_encode64(padding: false)
 end

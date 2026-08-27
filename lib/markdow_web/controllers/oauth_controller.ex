@@ -2,6 +2,8 @@ defmodule MarkdowWeb.OAuthController do
   use MarkdowWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
+  @behaviour Boruta.Oauth.TokenApplication
+
   alias Markdow.AgentAuth
   alias Markdow.Index
   alias MarkdowWeb.PublicOrigin
@@ -9,6 +11,7 @@ defmodule MarkdowWeb.OAuthController do
 
   @claim_grant AgentAuth.claim_grant()
   @jwt_bearer_grant AgentAuth.jwt_bearer_grant()
+  @client_credentials_grant "client_credentials"
 
   tags ["Agent authentication"]
   security []
@@ -48,6 +51,13 @@ defmodule MarkdowWeb.OAuthController do
     )
   end
 
+  # Boruta reads the client credentials off the connection itself, from either
+  # the basic authorization header or the form body, so the request is handed
+  # over whole rather than destructured here.
+  def token(conn, %{"grant_type" => grant}) when grant == @client_credentials_grant do
+    Boruta.Oauth.token(conn, __MODULE__)
+  end
+
   def token(conn, %{"grant_type" => _grant}) do
     conn |> put_status(400) |> json(%{error: "unsupported_grant_type"})
   end
@@ -62,6 +72,26 @@ defmodule MarkdowWeb.OAuthController do
   end
 
   def revoke(conn, _params), do: send_resp(conn, 200, "")
+
+  @impl Boruta.Oauth.TokenApplication
+  def token_success(conn, %Boruta.Oauth.TokenResponse{} = response) do
+    json(conn, %{
+      access_token: response.access_token,
+      token_type: response.token_type,
+      expires_in: response.expires_in,
+      scope: response.token && response.token.scope
+    })
+  end
+
+  @impl Boruta.Oauth.TokenApplication
+  def token_error(conn, %Boruta.Oauth.Error{} = error) do
+    conn
+    |> put_status(error.status || :bad_request)
+    |> json(%{
+      error: to_string(error.error),
+      error_description: error.error_description
+    })
+  end
 
   defp token_response(conn, {:ok, response}), do: json(conn, response)
 

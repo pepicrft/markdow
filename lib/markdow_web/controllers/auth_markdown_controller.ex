@@ -41,6 +41,10 @@ defmodule MarkdowWeb.AuthMarkdownController do
 
     `identity_assertion` and `anonymous` are not enabled. Their registration errors are `identity_assertion_not_enabled` and `anonymous_not_enabled`.
 
+    Use the claim ceremony when a person is present to approve the connection. It is the only way to gain access to an account for the first time, and the access token it returns lasts an hour and cannot be refreshed.
+
+    Use a registered client, in section 9, when a service has to keep working without anyone there to approve it again. Registering requires a credential that already has access to the account, so it grants nothing new: it turns access somebody already approved into a credential that can be presented again tomorrow.
+
     ## 3. Register with service_auth
 
     ```http
@@ -165,6 +169,33 @@ defmodule MarkdowWeb.AuthMarkdownController do
     ```
 
     An operator can revoke every agent token and identity assertion for a user through the `revoke_agent_credentials` REST and MCP operation. Markdow does not advertise provider security events because `identity_assertion` registration is not enabled.
+
+    ## 9. Register a client for unattended access
+
+    Client registration follows [Request for Comments 7591](https://www.rfc-editor.org/rfc/rfc7591). The endpoint is protected, which that document permits: a client is registered for one account, and the credential you present decides which. An access token from the claim ceremony registers a client for the account it already belongs to. An application key stands for the deployment rather than a person, so it must name the account with `markdow_user_id`.
+
+    ```http
+    POST #{origin}/oauth2/register
+    Authorization: Bearer <access_token>
+    Content-Type: application/json
+
+    {"client_name": "hermes"}
+    ```
+
+    The response carries `client_id` and `client_secret`. The secret is shown once and never expires. Store it the way you would store a password.
+
+    Exchange it for an access token whenever you need one. There is no refresh token because there is no need for one: the client authenticates itself again.
+
+    ```http
+    POST #{origin}/oauth2/token
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=client_credentials&client_id=<client_id>&client_secret=<client_secret>&scope=mcp notes:read notes:write
+    ```
+
+    A registered client can only ever reach the account it was registered for. It cannot create accounts, and it cannot act as a person: `authorization_code` and the password grant are not offered, so there is no flow in which a client speaks for a user who never signed in.
+
+    Revoke a client by deleting it. Its tokens stop being accepted with it.
 
     ## Granted scopes
 

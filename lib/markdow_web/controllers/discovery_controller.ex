@@ -3,6 +3,7 @@ defmodule MarkdowWeb.DiscoveryController do
   use OpenApiSpex.ControllerSpecs
 
   alias Markdow.AgentAuth
+  alias Markdow.OAuth
   alias MarkdowWeb.PublicOrigin
   alias OpenApiSpex.Schema
 
@@ -69,8 +70,13 @@ defmodule MarkdowWeb.DiscoveryController do
       issuer: origin,
       token_endpoint: origin <> "/oauth2/token",
       revocation_endpoint: origin <> "/oauth2/revoke",
-      grant_types_supported: [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()],
-      token_endpoint_auth_methods_supported: ["none"],
+      registration_endpoint: origin <> "/oauth2/register",
+      grant_types_supported:
+        [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()] ++ OAuth.grant_types(),
+      # "none" covers the claim and assertion grants, which authenticate the
+      # credential rather than the client. A registered client authenticates
+      # with the secret it was issued.
+      token_endpoint_auth_methods_supported: ["none", "client_secret_basic", "client_secret_post"],
       jwks_uri: origin <> "/.well-known/jwks.json",
       agent_auth: %{
         skill: origin <> "/auth.md",
