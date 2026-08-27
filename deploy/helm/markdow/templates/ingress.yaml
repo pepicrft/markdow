@@ -5,7 +5,11 @@ metadata:
   name: {{ include "markdow.fullname" . }}
   labels:
     {{- include "markdow.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- $defaults := dict }}
+  {{- if .Values.ingress.proxyBodySize }}
+  {{- $_ := set $defaults "nginx.ingress.kubernetes.io/proxy-body-size" .Values.ingress.proxyBodySize }}
+  {{- end }}
+  {{- with merge (deepCopy (.Values.ingress.annotations | default dict)) $defaults }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
