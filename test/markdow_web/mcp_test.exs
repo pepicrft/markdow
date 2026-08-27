@@ -28,7 +28,10 @@ defmodule MarkdowWeb.McpTest do
       })
 
     assert initialized.status == 200
-    assert Plug.Conn.get_resp_header(initialized, "mcp-session-id") != []
+    # Withholding the header is how a server tells a client it is stateless, and
+    # the client then sends none back. Returning one Markdow never stored made
+    # every client carry a session that did not exist.
+    assert Plug.Conn.get_resp_header(initialized, "mcp-session-id") == []
     assert json_response(initialized)["result"]["protocolVersion"] == "2025-06-18"
 
     tools =

@@ -40,6 +40,7 @@ defmodule Markdow.MixProject do
   defp deps do
     [
       {:bandit, "~> 1.12"},
+      {:boruta, "~> 2.3"},
       {:argon2_elixir, "~> 4.0"},
       {:browse_chrome, "~> 0.2"},
       {:carta, "~> 0.2"},

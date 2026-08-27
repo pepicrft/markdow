@@ -5,6 +5,7 @@ defmodule MarkdowWeb.ApiAuth do
 
   alias Markdow.AgentAuth
   alias Markdow.Index
+  alias Markdow.OAuth
   alias MarkdowWeb.PublicOrigin
 
   @spec init(keyword()) :: keyword()
@@ -15,17 +16,34 @@ defmodule MarkdowWeb.ApiAuth do
     required_scopes = Keyword.get(opts, :scopes, [])
 
     with {:ok, token} <- credential(conn),
-         {:ok, authorization} <-
-           AgentAuth.authorize(token, required_scopes,
-             index: conn.private[:markdow_index] || Index.context(),
-             issuer: PublicOrigin.from_conn(conn),
-             api_key: conn.private[:markdow_api_key] || Application.get_env(:markdow, :api_key),
-             resource: requested_resource(conn)
-           ) do
+         {:ok, authorization} <- authorize(conn, token, required_scopes) do
       assign(conn, :authorization, authorization)
     else
       {:error, :insufficient_scope} -> unauthorized(conn, "insufficient_scope", required_scopes)
       _error -> unauthorized(conn, "invalid_token", required_scopes)
+    end
+  end
+
+  # Two kinds of credential reach the same operations. A claim ceremony token is
+  # tried first because it is the one Markdow issues most and the one bound to a
+  # resource, and a registered client's token is tried second. Both resolve to
+  # the same authorization shape, so nothing downstream branches on which was
+  # presented.
+  #
+  # `:insufficient_scope` from the first path is returned rather than retried:
+  # the token was recognised and simply did not carry the scope, and turning
+  # that into an `invalid_token` by falling through would tell the caller to go
+  # and get a different credential when the one they hold is the right one.
+  defp authorize(conn, token, required_scopes) do
+    case AgentAuth.authorize(token, required_scopes,
+           index: conn.private[:markdow_index] || Index.context(),
+           issuer: PublicOrigin.from_conn(conn),
+           api_key: conn.private[:markdow_api_key] || Application.get_env(:markdow, :api_key),
+           resource: requested_resource(conn)
+         ) do
+      {:ok, authorization} -> {:ok, authorization}
+      {:error, :insufficient_scope} -> {:error, :insufficient_scope}
+      {:error, _reason} -> OAuth.authorize(token, required_scopes, requested_resource(conn))
     end
   end
 

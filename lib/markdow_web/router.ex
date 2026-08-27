@@ -58,6 +58,8 @@ defmodule MarkdowWeb.Router do
     get "/health", HealthController, :show
     get "/users", UserController, :index
     post "/users", UserController, :create
+    get "/users/:user_id/oauth-clients", OAuthClientController, :index
+    delete "/users/:user_id/oauth-clients/:id", OAuthClientController, :delete
     get "/users/:id", UserController, :show
     delete "/users/:user_id/agent-credentials", UserController, :revoke_agent_credentials
     get "/users/:user_id/vaults", VaultController, :index
@@ -119,6 +121,7 @@ defmodule MarkdowWeb.Router do
     post "/agent/event/notify", DiscoveryController, :event_notify
     post "/oauth2/token", OAuthController, :token
     post "/oauth2/revoke", OAuthController, :revoke
+    post "/oauth2/register", OAuthRegistrationController, :create
   end
 
   scope "/", MarkdowWeb do
