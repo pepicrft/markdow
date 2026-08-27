@@ -43,7 +43,7 @@ defmodule MarkdowWeb.ApiAuth do
          ) do
       {:ok, authorization} -> {:ok, authorization}
       {:error, :insufficient_scope} -> {:error, :insufficient_scope}
-      {:error, _reason} -> OAuth.authorize(token, required_scopes)
+      {:error, _reason} -> OAuth.authorize(token, required_scopes, requested_resource(conn))
     end
   end
 

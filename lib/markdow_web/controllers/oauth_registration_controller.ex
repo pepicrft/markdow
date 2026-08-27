@@ -25,7 +25,16 @@ defmodule MarkdowWeb.OAuthRegistrationController do
   # authenticated registration into a request forgery primitive pointed at
   # anything the cluster can reach. Markdow authenticates clients by secret, so
   # nothing is lost by refusing to take a URL here.
-  @registration_attributes ~w(client_name redirect_uris token_endpoint_auth_method logo_uri)
+  #
+  # Boruta reads registration metadata by atom key. The mapping is spelled out
+  # rather than converted, so no request can reach an atom this list does not
+  # already name.
+  @registration_attributes %{
+    "client_name" => :client_name,
+    "redirect_uris" => :redirect_uris,
+    "token_endpoint_auth_method" => :token_endpoint_auth_method,
+    "logo_uri" => :logo_uri
+  }
 
   plug MarkdowWeb.ApiAuth, scopes: []
 
@@ -76,6 +85,7 @@ defmodule MarkdowWeb.OAuthRegistrationController do
     case OAuth.finalize_registration(client, user_id) do
       {:ok, client} ->
         conn
+        |> no_store()
         |> put_status(201)
         |> json(registration_response(conn, client))
 
@@ -100,8 +110,14 @@ defmodule MarkdowWeb.OAuthRegistrationController do
   # so a client cannot register itself against somebody else by asking. The
   # application key stands for the deployment rather than a person, so it has to
   # name the account explicitly and the account has to exist.
+  #
+  # A registered client cannot register further clients even for its own
+  # account. It would not gain any reach it does not already have, but it would
+  # let one leaked secret grow into a set of credentials that outlive revoking
+  # the one that leaked. Registration stays with credentials a person holds.
   defp owner_id(conn, _params) do
     case conn.assigns.authorization do
+      %{client_id: client_id} when is_binary(client_id) -> {:error, :client_may_not_register}
       %{kind: :access_token, user_id: user_id} when is_binary(user_id) -> {:ok, user_id}
       %{kind: :api_key} -> named_owner(conn)
       _other -> {:error, :owner_required}
@@ -122,13 +138,17 @@ defmodule MarkdowWeb.OAuthRegistrationController do
   end
 
   defp registration_attributes(params) do
-    params
-    |> Map.take(@registration_attributes)
-    # Boruta reads registration metadata by atom key, and the keys here are a
-    # fixed literal list rather than anything a request can widen.
-    |> Map.new(fn {key, value} -> {String.to_existing_atom(key), value} end)
+    Enum.reduce(@registration_attributes, %{}, fn {name, key}, attributes ->
+      case Map.fetch(params, name) do
+        {:ok, value} -> Map.put(attributes, key, value)
+        :error -> attributes
+      end
+    end)
   end
 
+  # RFC 7591 section 3.2.1 asks for the metadata as it was actually registered,
+  # not as it was asked for. Reporting an authentication method the client was
+  # not given would send it to the token endpoint to fail.
   defp registration_response(conn, client) do
     origin = PublicOrigin.from_conn(conn)
 
@@ -139,11 +159,21 @@ defmodule MarkdowWeb.OAuthRegistrationController do
       # Nothing expires the secret. It is revoked by deleting the client.
       client_secret_expires_at: 0,
       client_name: client.name,
-      grant_types: OAuth.grant_types(),
-      token_endpoint_auth_method: "client_secret_post",
+      redirect_uris: client.redirect_uris,
+      logo_uri: client.logo_uri,
+      grant_types: client.supported_grant_types,
+      token_endpoint_auth_method: hd(client.token_endpoint_auth_methods),
+      token_endpoint_auth_methods: client.token_endpoint_auth_methods,
       token_endpoint: origin <> "/oauth2/token",
       scope: Enum.join(OAuth.scopes(), " ")
     }
+  end
+
+  # RFC 6749 section 5.1: a response carrying a credential must not be cached.
+  defp no_store(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("pragma", "no-cache")
   end
 
   defp registration_error(conn, :unknown_account) do
@@ -152,6 +182,15 @@ defmodule MarkdowWeb.OAuthRegistrationController do
     |> json(%{
       error: "invalid_client_metadata",
       error_description: "The named account does not exist."
+    })
+  end
+
+  defp registration_error(conn, :client_may_not_register) do
+    conn
+    |> put_status(403)
+    |> json(%{
+      error: "invalid_client_metadata",
+      error_description: "A registered client cannot register further clients."
     })
   end
 

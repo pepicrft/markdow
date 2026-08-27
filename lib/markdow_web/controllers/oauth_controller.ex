@@ -6,6 +6,7 @@ defmodule MarkdowWeb.OAuthController do
 
   alias Markdow.AgentAuth
   alias Markdow.Index
+  alias Markdow.OAuth
   alias MarkdowWeb.PublicOrigin
   alias OpenApiSpex.Schema
 
@@ -64,18 +65,36 @@ defmodule MarkdowWeb.OAuthController do
 
   def token(conn, _params), do: conn |> put_status(400) |> json(%{error: "invalid_request"})
 
+  # RFC 7009 revocation is idempotent and does not tell the caller whether the
+  # token existed. Both kinds are attempted because the endpoint is advertised
+  # for the whole authorization server, and a caller holding a registered
+  # client's token has no other way to hand it back.
   def revoke(conn, %{"token" => token}) do
-    case AgentAuth.revoke_access_token(token, auth_opts(conn)) do
-      :ok -> send_resp(conn, 200, "")
-      {:error, _reason} -> send_resp(conn, 200, "")
-    end
+    AgentAuth.revoke_access_token(token, auth_opts(conn))
+    OAuth.revoke_token(token)
+
+    send_resp(conn, 200, "")
   end
 
   def revoke(conn, _params), do: send_resp(conn, 200, "")
 
   @impl Boruta.Oauth.TokenApplication
   def token_success(conn, %Boruta.Oauth.TokenResponse{} = response) do
-    json(conn, %{
+    # Boruta has no notion of an audience, so the RFC 8707 `resource` the client
+    # asked for is recorded here, against the token it just received. Only the
+    # two interfaces this server actually has are accepted; anything else is
+    # ignored rather than bound, so a typo cannot mint a token good nowhere.
+    origin = PublicOrigin.from_conn(conn)
+
+    OAuth.bind_resource(
+      response.access_token,
+      conn.body_params["resource"],
+      [origin, origin <> "/mcp"]
+    )
+
+    conn
+    |> no_store()
+    |> json(%{
       access_token: response.access_token,
       token_type: response.token_type,
       expires_in: response.expires_in,
@@ -93,7 +112,7 @@ defmodule MarkdowWeb.OAuthController do
     })
   end
 
-  defp token_response(conn, {:ok, response}), do: json(conn, response)
+  defp token_response(conn, {:ok, response}), do: conn |> no_store() |> json(response)
 
   defp token_response(conn, {:error, reason}) do
     conn
@@ -105,6 +124,13 @@ defmodule MarkdowWeb.OAuthController do
   defp error_description(:slow_down), do: "Polling is faster than the advertised interval."
   defp error_description(:expired_token), do: "The claim has expired."
   defp error_description(_reason), do: "The credential could not be exchanged."
+
+  # RFC 6749 section 5.1: a response carrying a credential must not be cached.
+  defp no_store(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("pragma", "no-cache")
+  end
 
   defp auth_opts(conn) do
     [

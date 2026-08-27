@@ -25,6 +25,7 @@ defmodule Markdow.OAuth do
   alias Boruta.Oauth.Token
   alias Markdow.AgentAuth
   alias Markdow.OAuth.ClientOwner
+  alias Markdow.OAuth.TokenResource
   alias Markdow.Repo
 
   @client_credentials "client_credentials"
@@ -102,6 +103,11 @@ defmodule Markdow.OAuth do
       {:ok, client} -> {:ok, client}
       {:error, reason} -> discard_client(client_id, reason)
     end
+  rescue
+    # A raise inside the transaction rolls the narrowing back but leaves the
+    # client Boruta already created, so cleanup has to cover this path too or
+    # the all-or-nothing claim above is not true.
+    exception -> discard_client(client_id, exception)
   end
 
   @doc """
@@ -111,11 +117,15 @@ defmodule Markdow.OAuth do
   token, so `Markdow.Operations` and `Markdow.MCP` cannot tell the two apart and
   neither needs a second authorization path.
   """
-  @spec authorize(String.t(), [String.t()]) :: {:ok, map()} | {:error, atom()}
-  def authorize(token, required_scopes) when is_binary(token) and is_list(required_scopes) do
+  @spec authorize(String.t(), [String.t()], String.t() | nil) :: {:ok, map()} | {:error, atom()}
+  def authorize(token, required_scopes, resource \\ nil)
+
+  def authorize(token, required_scopes, resource)
+      when is_binary(token) and is_list(required_scopes) do
     with {:ok, %{scope: scope, client: %{id: client_id}}} <-
            token_for(token),
          :ok <- authorize_scopes(scope, required_scopes),
+         :ok <- authorize_resource(token, resource),
          {:ok, user_id} <- owner(client_id) do
       {:ok,
        %{
@@ -127,7 +137,46 @@ defmodule Markdow.OAuth do
     end
   end
 
-  def authorize(_token, _required_scopes), do: {:error, :invalid_token}
+  def authorize(_token, _required_scopes, _resource), do: {:error, :invalid_token}
+
+  @doc """
+  Records the audience a token was asked for, per RFC 8707.
+
+  Only called when the client actually asked. A token requested without a
+  `resource` stays unbound and is usable at either interface, which is what a
+  client that never asked for a narrower token expects. The Model Context
+  Protocol tells clients to ask, so a client following it gets a token that
+  stops working anywhere else.
+  """
+  @spec bind_resource(String.t(), String.t() | nil, [String.t()]) :: :ok
+  def bind_resource(_token, resource, _allowed) when resource in [nil, ""], do: :ok
+
+  def bind_resource(token, resource, allowed) when is_binary(token) do
+    if resource in allowed do
+      %TokenResource{}
+      |> TokenResource.changeset(%{token_digest: digest(token), resource: resource})
+      |> Repo.insert(on_conflict: :nothing)
+    end
+
+    :ok
+  end
+
+  # A token carries a binding or it does not. One that does is refused anywhere
+  # else, and one that does not is accepted wherever its scopes reach, which is
+  # the behaviour a client that never asked for an audience was given.
+  defp authorize_resource(_token, nil), do: :ok
+
+  defp authorize_resource(token, requested) do
+    case Repo.one(
+           from(r in TokenResource, where: r.token_digest == ^digest(token), select: r.resource)
+         ) do
+      nil -> :ok
+      ^requested -> :ok
+      _other -> {:error, :invalid_token}
+    end
+  end
+
+  defp digest(token), do: :crypto.hash(:sha256, token)
 
   @doc "The account a registered client acts for, if it has one."
   @spec owner(String.t()) :: {:ok, String.t()} | {:error, :invalid_token}
@@ -136,6 +185,88 @@ defmodule Markdow.OAuth do
       nil -> {:error, :invalid_token}
       user_id -> {:ok, user_id}
     end
+  end
+
+  @doc """
+  Clients registered for an account.
+
+  Secrets are never returned. A secret is shown once, when the client is
+  registered, and this exists so somebody can see what holds access to their
+  account and take it away again.
+  """
+  @spec list_clients(String.t()) :: [map()]
+  def list_clients(user_id) when is_binary(user_id) do
+    owned =
+      Repo.all(
+        from(o in ClientOwner,
+          where: o.user_id == ^user_id,
+          select: {o.client_id, o.inserted_at}
+        )
+      )
+
+    registered = Map.new(owned)
+
+    Admin.list_clients()
+    |> Enum.filter(&Map.has_key?(registered, &1.id))
+    |> Enum.map(
+      &%{
+        client_id: &1.id,
+        client_name: &1.name,
+        grant_types: &1.supported_grant_types,
+        registered_at: registered[&1.id]
+      }
+    )
+    |> Enum.sort_by(& &1.registered_at, DateTime)
+  end
+
+  @doc """
+  Deletes a client and revokes what it was issued.
+
+  Deleting is the only revocation a registered client has, because its secret
+  never expires. The tokens are revoked first: the foreign key only nils the
+  client off a token, which would leave live-looking rows behind that no longer
+  answer to anybody.
+  """
+  @spec delete_client(String.t(), String.t()) :: :ok | {:error, :not_found}
+  def delete_client(client_id, user_id) when is_binary(client_id) and is_binary(user_id) do
+    with {:ok, ^user_id} <- owner(client_id),
+         {:ok, client} <- fetch_client(client_id) do
+      revoke_client_tokens(client_id)
+      Admin.delete_client(client)
+      :ok
+    else
+      _error -> {:error, :not_found}
+    end
+  end
+
+  @doc "Revokes one registered client's access token, by its value."
+  @spec revoke_token(String.t()) :: :ok
+  def revoke_token(token) when is_binary(token) do
+    case AccessToken.authorize(value: token) do
+      {:ok, %Token{} = boruta_token} ->
+        Boruta.AccessTokensAdapter.revoke(boruta_token)
+        :ok
+
+      _error ->
+        :ok
+    end
+  end
+
+  defp revoke_client_tokens(client_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.update_all(
+      from(token in Boruta.Ecto.Token,
+        where: token.client_id == ^client_id and is_nil(token.revoked_at)
+      ),
+      set: [revoked_at: now]
+    )
+  end
+
+  defp fetch_client(client_id) do
+    {:ok, Admin.get_client!(client_id)}
+  rescue
+    Ecto.NoResultsError -> {:error, :not_found}
   end
 
   defp token_for(token) do

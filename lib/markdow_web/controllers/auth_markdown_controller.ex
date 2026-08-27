@@ -190,12 +190,25 @@ defmodule MarkdowWeb.AuthMarkdownController do
     POST #{origin}/oauth2/token
     Content-Type: application/x-www-form-urlencoded
 
-    grant_type=client_credentials&client_id=<client_id>&client_secret=<client_secret>&scope=mcp notes:read notes:write
+    grant_type=client_credentials&client_id=<client_id>&client_secret=<client_secret>&scope=mcp notes:read notes:write&resource=#{origin}/mcp
     ```
 
-    A registered client can only ever reach the account it was registered for. It cannot create accounts, and it cannot act as a person: `authorization_code` and the password grant are not offered, so there is no flow in which a client speaks for a user who never signed in.
+    Send `resource` to bind the token to one interface, following [Request for Comments 8707](https://www.rfc-editor.org/rfc/rfc8707). Use `#{origin}/mcp` for the Model Context Protocol server and `#{origin}` for everything else. A bound token is refused at the other interface. A token requested without `resource` is not bound and reaches both, so ask for the narrower one.
 
-    Revoke a client by deleting it. Its tokens stop being accepted with it.
+    A registered client can only ever reach the account it was registered for. It cannot create accounts, it cannot register further clients, and it cannot act as a person: `authorization_code` and the password grant are not offered, so there is no flow in which a client speaks for a user who never signed in.
+
+    ## 10. See and revoke registered clients
+
+    A secret never expires, so deleting the client is what revokes it. Deleting revokes the tokens it was issued at the same time.
+
+    ```http
+    GET #{origin}/users/<user_id>/oauth-clients
+    DELETE #{origin}/users/<user_id>/oauth-clients/<client_id>
+    ```
+
+    The listing never returns secrets. Deleting requires `users:write`, which no agent token and no registered client is granted, so a leaked client credential cannot be used to delete the evidence or to remove a client somebody else relies on.
+
+    A single access token can also be handed back through the revocation endpoint in section 8, which accepts both kinds of credential.
 
     ## Granted scopes
 

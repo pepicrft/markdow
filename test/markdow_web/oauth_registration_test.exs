@@ -1,7 +1,5 @@
 defmodule MarkdowWeb.OAuthRegistrationTest do
-  # Boruta caches clients in a process-wide Nebulex instance that does not roll
-  # back with the sandbox, so these run one at a time.
-  use Markdow.DataCase, async: false
+  use Markdow.DataCase, async: true
 
   import Ecto.Query, only: [from: 2]
 
@@ -116,6 +114,211 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
     assert written.status == 401
   end
 
+  test "a registered client cannot register further clients", %{index: index} do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+    token = token(index, client, "users:read")
+
+    response =
+      DataCase.endpoint_conn(
+        :post,
+        "/oauth2/register",
+        %{"client_name" => "spawned"},
+        index,
+        token["access_token"]
+      )
+
+    assert response.status == 403
+  end
+
+  test "deleting a client revokes it and the tokens it was issued", %{
+    index: index,
+    vault: vault,
+    owner: owner
+  } do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+    token = token(index, client, "documents:write")
+
+    listed =
+      :get
+      |> DataCase.endpoint_conn("/users/#{owner.id}/oauth-clients", nil, index, "test")
+      |> json()
+
+    assert Enum.map(listed, & &1["client_id"]) == [client["client_id"]]
+    # A listing exists so somebody can see what holds access. It must not hand
+    # the secret back.
+    refute Enum.any?(listed, &Map.has_key?(&1, "client_secret"))
+
+    deleted =
+      DataCase.endpoint_conn(
+        :delete,
+        "/users/#{owner.id}/oauth-clients/#{client["client_id"]}",
+        nil,
+        index,
+        "test"
+      )
+
+    assert deleted.status == 200
+
+    # The token it already held stops working, rather than outliving the client.
+    written =
+      DataCase.endpoint_conn(
+        :put,
+        "/vaults/#{vault.id}/documents/After.md",
+        %{"data_base64" => Base.encode64("nope")},
+        index,
+        token["access_token"]
+      )
+
+    assert written.status == 401
+
+    # And it cannot mint a new one.
+    refused =
+      DataCase.form_conn(
+        "/oauth2/token",
+        %{
+          "grant_type" => "client_credentials",
+          "client_id" => client["client_id"],
+          "client_secret" => client["client_secret"],
+          "scope" => "documents:write"
+        },
+        index
+      )
+
+    assert refused.status in [400, 401]
+  end
+
+  test "an account cannot delete another account's client", %{index: index} do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+
+    response =
+      DataCase.endpoint_conn(
+        :delete,
+        "/users/stranger/oauth-clients/#{client["client_id"]}",
+        nil,
+        index,
+        "test"
+      )
+
+    # The application key is allowed here, but the client does not belong to the
+    # account named in the path, so there is nothing of that account to delete.
+    assert response.status == 404
+  end
+
+  test "revoking a registered client's token through RFC 7009 stops it working", %{
+    index: index,
+    vault: vault
+  } do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+    token = token(index, client, "documents:write")
+
+    revoked =
+      DataCase.form_conn(
+        "/oauth2/revoke",
+        %{"token" => token["access_token"], "token_type_hint" => "access_token"},
+        index
+      )
+
+    assert revoked.status == 200
+
+    written =
+      DataCase.endpoint_conn(
+        :put,
+        "/vaults/#{vault.id}/documents/Revoked.md",
+        %{"data_base64" => Base.encode64("nope")},
+        index,
+        token["access_token"]
+      )
+
+    assert written.status == 401
+  end
+
+  test "a token asked for one interface is refused at the other", %{index: index, vault: vault} do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+    origin = DataCase.public_origin()
+
+    # Identical scopes on both, so the audience is the only thing that differs.
+    scope = "mcp notes:read documents:read"
+    mcp_token = token(index, client, scope, origin <> "/mcp")
+    rest_token = token(index, client, scope, origin)
+
+    # The MCP-audience token works at /mcp and nowhere else.
+    assert DataCase.endpoint_conn(
+             :post,
+             "/mcp",
+             %{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize", "params" => %{}},
+             index,
+             mcp_token["access_token"]
+           ).status == 200
+
+    assert DataCase.endpoint_conn(
+             :get,
+             "/vaults/#{vault.id}/documents",
+             nil,
+             index,
+             mcp_token["access_token"]
+           ).status == 401
+
+    # And the interface token is refused at /mcp even though it carries `mcp`.
+    assert DataCase.endpoint_conn(
+             :get,
+             "/vaults/#{vault.id}/documents",
+             nil,
+             index,
+             rest_token["access_token"]
+           ).status == 200
+
+    assert DataCase.endpoint_conn(
+             :post,
+             "/mcp",
+             %{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize", "params" => %{}},
+             index,
+             rest_token["access_token"]
+           ).status == 401
+  end
+
+  test "a token asked for no audience still reaches both interfaces", %{
+    index: index,
+    vault: vault
+  } do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+    unbound = token(index, client, "mcp documents:read")
+
+    assert DataCase.endpoint_conn(
+             :get,
+             "/vaults/#{vault.id}/documents",
+             nil,
+             index,
+             unbound["access_token"]
+           ).status == 200
+
+    assert DataCase.endpoint_conn(
+             :post,
+             "/mcp",
+             %{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize", "params" => %{}},
+             index,
+             unbound["access_token"]
+           ).status == 200
+  end
+
+  test "credential responses forbid caching", %{index: index} do
+    registered = register(index, %{"markdow_user_id" => "owner"})
+    assert Plug.Conn.get_resp_header(registered, "cache-control") == ["no-store"]
+
+    issued =
+      DataCase.form_conn(
+        "/oauth2/token",
+        %{
+          "grant_type" => "client_credentials",
+          "client_id" => json(registered)["client_id"],
+          "client_secret" => json(registered)["client_secret"],
+          "scope" => "notes:read"
+        },
+        index
+      )
+
+    assert Plug.Conn.get_resp_header(issued, "cache-control") == ["no-store"]
+  end
+
   test "refuses to register without a credential", %{index: index} do
     response =
       DataCase.endpoint_conn(
@@ -219,6 +422,27 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
     assert read["structuredContent"]["result"]["body"] =~ "Stored by a registered client"
   end
 
+  test "a registered client without the mcp scope cannot reach the endpoint at all", %{
+    index: index
+  } do
+    client = index |> register(%{"markdow_user_id" => "owner"}) |> json()
+    token = token(index, client, "notes:read notes:write")
+
+    response =
+      DataCase.endpoint_conn(
+        :post,
+        "/mcp",
+        %{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize", "params" => %{}},
+        index,
+        token["access_token"]
+      )
+
+    # Scope is what gates the transport. Boruta tokens are not bound to a
+    # resource the way claim ceremony tokens are, so this is the check that
+    # keeps a plain notes credential off the protocol endpoint.
+    assert response.status == 401
+  end
+
   test "a registered client is refused a Model Context Protocol tool outside its scopes", %{
     index: index,
     vault: vault
@@ -257,17 +481,18 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
   defp register(index, params),
     do: DataCase.endpoint_conn(:post, "/oauth2/register", params, index, "test")
 
-  defp token(index, client, scope) do
-    DataCase.form_conn(
-      "/oauth2/token",
-      %{
-        "grant_type" => "client_credentials",
-        "client_id" => client["client_id"],
-        "client_secret" => client["client_secret"],
-        "scope" => scope
-      },
-      index
-    )
+  defp token(index, client, scope, resource \\ nil) do
+    params = %{
+      "grant_type" => "client_credentials",
+      "client_id" => client["client_id"],
+      "client_secret" => client["client_secret"],
+      "scope" => scope
+    }
+
+    params = if resource, do: Map.put(params, "resource", resource), else: params
+
+    "/oauth2/token"
+    |> DataCase.form_conn(params, index)
     |> json()
   end
 

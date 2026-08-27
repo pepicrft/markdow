@@ -73,7 +73,7 @@ config :browse_chrome,
 
 config :phoenix,
        :filter_parameters,
-       ~w(password token email_verification_token claim_token claim_attempt_token user_code assertion data_base64)
+       ~w(password token access_token client_secret email_verification_token claim_token claim_attempt_token user_code assertion data_base64)
 
 config :markdow, Markdow.Mailer, adapter: Swoosh.Adapters.Local
 config :swoosh, :api_client, Swoosh.ApiClient.Finch
