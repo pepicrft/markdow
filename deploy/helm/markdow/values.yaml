@@ -22,6 +22,12 @@ service:
 ingress:
   enabled: false
   className: nginx
+  # The document API accepts 5 MiB of bytes, and they arrive base64 encoded
+  # inside a JSON body, which costs a third more. nginx defaults to 1m and
+  # rejects anything past it with an HTML 413 the API never sees, so an upload
+  # of roughly 750 KiB or more fails while the application would have taken it.
+  # Set to "" to leave the ingress controller default alone.
+  proxyBodySize: 8m
   annotations: {}
   tlsSecretName: markdow-tls
 
