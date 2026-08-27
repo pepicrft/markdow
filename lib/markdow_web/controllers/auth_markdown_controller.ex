@@ -170,9 +170,44 @@ defmodule MarkdowWeb.AuthMarkdownController do
 
     An operator can revoke every agent token and identity assertion for a user through the `revoke_agent_credentials` REST and MCP operation. Markdow does not advertise provider security events because `identity_assertion` registration is not enabled.
 
-    ## 9. Register a client for unattended access
+    ## 9. Register a client
 
-    Client registration follows [Request for Comments 7591](https://www.rfc-editor.org/rfc/rfc7591). The endpoint is protected, which that document permits: a client is registered for one account, and the credential you present decides which. An access token from the claim ceremony registers a client for the account it already belongs to. An application key stands for the deployment rather than a person, so it must name the account with `markdow_user_id`.
+    Client registration follows [Request for Comments 7591](https://www.rfc-editor.org/rfc/rfc7591) and answers two different asks depending on whether you present a credential.
+
+    **Without one**, you get a public client for the authorization code flow. Send `redirect_uris`. There is no secret, and the client is bound to no account: on its own it can reach nothing at all. It becomes useful only once somebody signs in at `#{origin}/oauth2/authorize` and approves it, and only for the account that approved. This is the path an interactive client takes.
+
+    ```http
+    POST #{origin}/oauth2/register
+    Content-Type: application/json
+
+    {"client_name": "Your application", "redirect_uris": ["https://example.com/callback"]}
+    ```
+
+    Then send the person to the authorization endpoint. Proof key for code exchange is required, not optional, and only `S256` is accepted.
+
+    ```
+    GET #{origin}/oauth2/authorize
+      ?response_type=code
+      &client_id=<client_id>
+      &redirect_uri=<redirect_uri>
+      &scope=mcp notes:read notes:write
+      &code_challenge=<challenge>
+      &code_challenge_method=S256
+      &resource=#{origin}/mcp
+    ```
+
+    They sign in on a Markdow page and see what you are asking for before deciding. Your application never sees the password. Exchange the returned code with the verifier you committed to:
+
+    ```http
+    POST #{origin}/oauth2/token
+    Content-Type: application/x-www-form-urlencoded
+
+    grant_type=authorization_code&client_id=<client_id>&code=<code>&redirect_uri=<redirect_uri>&code_verifier=<verifier>
+    ```
+
+    The resulting token acts for the person who approved it, whoever registered the client.
+
+    **With a credential**, you get a confidential client for the client credentials grant, described below. That one acts on its own with nobody present, which is why registering it takes a credential that already has access. An access token from the claim ceremony registers a client for the account it belongs to. An application key stands for the deployment rather than a person, so it must name the account with `markdow_user_id`.
 
     ```http
     POST #{origin}/oauth2/register

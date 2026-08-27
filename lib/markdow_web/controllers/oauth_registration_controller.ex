@@ -2,11 +2,20 @@ defmodule MarkdowWeb.OAuthRegistrationController do
   @moduledoc """
   RFC 7591 dynamic client registration.
 
-  The endpoint is protected, which RFC 7591 section 3 allows and which Markdow
-  needs: a client is registered *for an account*, and an open endpoint would be
-  a way to mint credentials against a vault without the person who owns it ever
-  being asked. The credential presented here decides the account the new client
-  will act for, and that binding cannot be changed afterwards.
+  Registration answers two different asks with the same endpoint, and which one
+  you get depends on whether you present a credential.
+
+  Anonymously, you get a public client for the authorization code flow. It is
+  bound to no account and can reach nothing by itself. It becomes useful only
+  when somebody signs in on `/oauth2/authorize` and approves it, and only for
+  the account that approved. This is the shape Model Context Protocol clients
+  expect, and it is safe to leave open because consent, not registration, is
+  what grants access.
+
+  With a credential, you get a confidential client for the client credentials
+  grant, bound at registration to the account behind that credential and unable
+  to change it afterwards. That one acts on its own with no person present, so
+  registering it has to be something only an account holder can do.
   """
 
   use MarkdowWeb, :controller
@@ -36,7 +45,7 @@ defmodule MarkdowWeb.OAuthRegistrationController do
     "logo_uri" => :logo_uri
   }
 
-  plug MarkdowWeb.ApiAuth, scopes: []
+  plug MarkdowWeb.ApiAuth, scopes: [], optional: true
 
   tags ["Agent authentication"]
   security [%{"bearerAuth" => []}]
@@ -78,6 +87,27 @@ defmodule MarkdowWeb.OAuthRegistrationController do
     end
   end
 
+  # Anonymous registration is open, which RFC 7591 and the Model Context
+  # Protocol both expect, and which is safe here precisely because the client it
+  # creates is worth nothing on its own. It has no account, cannot use the
+  # client credentials grant, and only ever gets a token after somebody signs in
+  # on a Markdow page and approves it. The consent is the grant; the client
+  # identifier is just a name for who is asking.
+  defp anonymous_owner(conn) do
+    if redirect_uris(conn) == [] do
+      {:error, :redirect_uri_required}
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp redirect_uris(conn) do
+    conn.body_params
+    |> Map.get("redirect_uris", [])
+    |> List.wrap()
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  end
+
   @impl Boruta.Openid.DynamicRegistrationApplication
   def client_registered(conn, client) do
     user_id = conn.private[:markdow_registration_user_id]
@@ -116,7 +146,8 @@ defmodule MarkdowWeb.OAuthRegistrationController do
   # let one leaked secret grow into a set of credentials that outlive revoking
   # the one that leaked. Registration stays with credentials a person holds.
   defp owner_id(conn, _params) do
-    case conn.assigns.authorization do
+    case conn.assigns[:authorization] do
+      nil -> anonymous_owner(conn)
       %{client_id: client_id} when is_binary(client_id) -> {:error, :client_may_not_register}
       %{kind: :access_token, user_id: user_id} when is_binary(user_id) -> {:ok, user_id}
       %{kind: :api_key} -> named_owner(conn)
@@ -154,18 +185,31 @@ defmodule MarkdowWeb.OAuthRegistrationController do
 
     %{
       client_id: client.id,
-      client_secret: client.secret,
       client_id_issued_at: DateTime.to_unix(DateTime.utc_now()),
-      # Nothing expires the secret. It is revoked by deleting the client.
-      client_secret_expires_at: 0,
       client_name: client.name,
       redirect_uris: client.redirect_uris,
       logo_uri: client.logo_uri,
       grant_types: client.supported_grant_types,
-      token_endpoint_auth_method: hd(client.token_endpoint_auth_methods),
-      token_endpoint_auth_methods: client.token_endpoint_auth_methods,
       token_endpoint: origin <> "/oauth2/token",
       scope: Enum.join(OAuth.scopes(), " ")
+    }
+    |> Map.merge(secret_fields(client))
+  end
+
+  # Boruta generates a secret for every client, but a public one is never asked
+  # for it: proof key for code exchange is what protects its code, and the
+  # exchange succeeds without it. Handing it back anyway would tell a client it
+  # is confidential when it is not, and RFC 7591 treats the presence of
+  # `client_secret` as exactly that claim.
+  defp secret_fields(%{confidential: false}), do: %{token_endpoint_auth_method: "none"}
+
+  defp secret_fields(client) do
+    %{
+      client_secret: client.secret,
+      # Nothing expires the secret. It is revoked by deleting the client.
+      client_secret_expires_at: 0,
+      token_endpoint_auth_method: hd(client.token_endpoint_auth_methods),
+      token_endpoint_auth_methods: client.token_endpoint_auth_methods
     }
   end
 
@@ -182,6 +226,16 @@ defmodule MarkdowWeb.OAuthRegistrationController do
     |> json(%{
       error: "invalid_client_metadata",
       error_description: "The named account does not exist."
+    })
+  end
+
+  defp registration_error(conn, :redirect_uri_required) do
+    conn
+    |> put_status(400)
+    |> json(%{
+      error: "invalid_redirect_uri",
+      error_description:
+        "Registering without a credential creates a client for the authorization code flow, which needs at least one redirect_uris entry."
     })
   end
 

@@ -13,6 +13,7 @@ defmodule MarkdowWeb.OAuthController do
   @claim_grant AgentAuth.claim_grant()
   @jwt_bearer_grant AgentAuth.jwt_bearer_grant()
   @client_credentials_grant "client_credentials"
+  @authorization_code_grant "authorization_code"
 
   tags ["Agent authentication"]
   security []
@@ -55,7 +56,8 @@ defmodule MarkdowWeb.OAuthController do
   # Boruta reads the client credentials off the connection itself, from either
   # the basic authorization header or the form body, so the request is handed
   # over whole rather than destructured here.
-  def token(conn, %{"grant_type" => grant}) when grant == @client_credentials_grant do
+  def token(conn, %{"grant_type" => grant})
+      when grant in [@client_credentials_grant, @authorization_code_grant] do
     Boruta.Oauth.token(conn, __MODULE__)
   end
 
