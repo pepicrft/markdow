@@ -71,8 +71,15 @@ defmodule MarkdowWeb.DiscoveryController do
       token_endpoint: origin <> "/oauth2/token",
       revocation_endpoint: origin <> "/oauth2/revoke",
       registration_endpoint: origin <> "/oauth2/register",
+      authorization_endpoint: origin <> "/oauth2/authorize",
+      response_types_supported: ["code"],
+      # Required rather than offered. A client that registered anonymously
+      # cannot keep a secret, so the code is all that stands between a stolen
+      # redirect and an account.
+      code_challenge_methods_supported: ["S256"],
       grant_types_supported:
-        [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()] ++ OAuth.grant_types(),
+        [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()] ++
+          OAuth.grant_types() ++ ["authorization_code"],
       # "none" covers the claim and assertion grants, which authenticate the
       # credential rather than the client. A registered client authenticates
       # with the secret it was issued.

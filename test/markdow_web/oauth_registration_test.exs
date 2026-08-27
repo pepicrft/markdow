@@ -319,7 +319,9 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
     assert Plug.Conn.get_resp_header(issued, "cache-control") == ["no-store"]
   end
 
-  test "refuses to register without a credential", %{index: index} do
+  test "refuses an anonymous registration that names nowhere to send anybody back to", %{
+    index: index
+  } do
     response =
       DataCase.endpoint_conn(
         :post,
@@ -329,7 +331,26 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
         nil
       )
 
-    assert response.status == 401
+    assert response.status == 400
+    assert json(response)["error"] == "invalid_redirect_uri"
+  end
+
+  test "an anonymous registration gets a public client bound to no account", %{index: index} do
+    client =
+      :post
+      |> DataCase.endpoint_conn(
+        "/oauth2/register",
+        %{"client_name" => "Claude", "redirect_uris" => ["https://claude.ai/callback"]},
+        index,
+        nil
+      )
+      |> json()
+
+    # It has no account and no secret, so on its own it reaches nothing. Only a
+    # person approving it on the authorize page makes it worth anything.
+    assert client["grant_types"] == ["authorization_code"]
+    refute Map.has_key?(client, "client_secret")
+    assert Markdow.OAuth.owner(client["client_id"]) == {:error, :invalid_token}
   end
 
   test "refuses an application key registration that names no account", %{index: index} do

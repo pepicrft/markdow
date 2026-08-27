@@ -9,13 +9,15 @@ defmodule Markdow.OAuth do
   to keep working needs a credential it can present again tomorrow, and that is
   what a registered client with a secret is.
 
-  A registered client is bound to exactly one Markdow account at registration
-  time, recorded in `Markdow.OAuth.ClientOwner`. That binding is the whole of
-  its authority: `Markdow.Operations.authorize_arguments/4` compares the account
-  on the token against the account owning the vault, so a client can only ever
-  reach the vaults of the account that registered it. A client with no binding
-  can still be issued a token and will be refused by every user and vault scoped
-  operation, which is the safe direction for the failure to point.
+  A token stands for an account in one of two ways. A client credentials token
+  has nobody behind it, so it uses the account its client was registered for,
+  recorded in `Markdow.OAuth.ClientOwner`. An authorization code token carries
+  the person who signed in and approved it, and that person is the account.
+
+  Either way `Markdow.Operations.authorize_arguments/4` compares that account
+  against the one owning the vault, so a client only ever reaches the vaults of
+  the account it is acting for. A token that resolves to no account at all is
+  refused everywhere, which is the safe direction for that failure to point.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -68,31 +70,24 @@ defmodule Markdow.OAuth do
   @doc """
   Restricts a freshly registered client and binds it to an account.
 
-  Boruta's registration changeset accepts only the RFC 7591 attributes, so the
-  client arrives supporting `authorization_code` as well and belonging to
-  nobody. Markdow exposes no authorization endpoint, so that grant is
-  unreachable, but advertising a grant this server cannot honour would be a lie
-  told to every client that reads the registration response.
+  Boruta's registration changeset accepts only the RFC 7591 attributes, so every
+  client arrives supporting both grants and belonging to nobody. Which one it
+  keeps depends on how it registered, and it keeps exactly one: a client that
+  could use either would blur the line between acting for itself and acting for
+  whoever last approved it.
 
   The narrowing and the binding happen together. If either fails the client is
-  deleted, because a client that exists without an owner is a credential nobody
-  can account for.
+  deleted, because a half configured client is a credential nobody can account
+  for.
   """
-  @spec finalize_registration(struct(), String.t()) ::
+  @spec finalize_registration(struct(), String.t() | nil) ::
           {:ok, struct()} | {:error, term()}
-  def finalize_registration(%{id: client_id}, user_id) when is_binary(user_id) do
+  def finalize_registration(%{id: client_id}, user_id) do
     result =
       Repo.transaction(fn ->
         with client <- Admin.get_client!(client_id),
-             {:ok, client} <-
-               Admin.update_client(client, %{
-                 supported_grant_types: grant_types(),
-                 confidential: true
-               }),
-             {:ok, _owner} <-
-               %ClientOwner{}
-               |> ClientOwner.changeset(%{client_id: client_id, user_id: user_id})
-               |> Repo.insert() do
+             {:ok, client} <- Admin.update_client(client, narrowing(user_id)),
+             :ok <- bind_owner(client_id, user_id) do
           client
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -110,6 +105,32 @@ defmodule Markdow.OAuth do
     exception -> discard_client(client_id, exception)
   end
 
+  # A client registered against a credential acts for that account by itself, so
+  # it gets the client credentials grant and must keep a secret.
+  #
+  # A client registered anonymously gets the authorization code grant and
+  # nothing else. On its own it can reach nothing at all: it has no owner, and a
+  # token only becomes worth something once a person has signed in on a Markdow
+  # page and approved it. Proof key for code exchange is required rather than
+  # offered, because a public client cannot keep a secret and the code is the
+  # only thing standing between a stolen redirect and an account.
+  defp narrowing(nil),
+    do: %{supported_grant_types: ["authorization_code"], confidential: false, pkce: true}
+
+  defp narrowing(_user_id),
+    do: %{supported_grant_types: grant_types(), confidential: true}
+
+  defp bind_owner(_client_id, nil), do: :ok
+
+  defp bind_owner(client_id, user_id) do
+    case %ClientOwner{}
+         |> ClientOwner.changeset(%{client_id: client_id, user_id: user_id})
+         |> Repo.insert() do
+      {:ok, _owner} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc """
   Resolves a Boruta access token into the authorization map Markdow operates on.
 
@@ -122,11 +143,11 @@ defmodule Markdow.OAuth do
 
   def authorize(token, required_scopes, resource)
       when is_binary(token) and is_list(required_scopes) do
-    with {:ok, %{scope: scope, client: %{id: client_id}}} <-
+    with {:ok, %{scope: scope, client: %{id: client_id}} = boruta_token} <-
            token_for(token),
          :ok <- authorize_scopes(scope, required_scopes),
          :ok <- authorize_resource(token, resource),
-         {:ok, user_id} <- owner(client_id) do
+         {:ok, user_id} <- account_for(boruta_token, client_id) do
       {:ok,
        %{
          kind: :access_token,
@@ -138,6 +159,18 @@ defmodule Markdow.OAuth do
   end
 
   def authorize(_token, _required_scopes, _resource), do: {:error, :invalid_token}
+
+  # Two ways a token comes to stand for an account, and they must not be mixed
+  # up. A token from the authorization code flow carries the person who signed
+  # in and approved it, and that person is the account, whoever registered the
+  # client. A client credentials token has nobody behind it, so it falls back to
+  # the account the client was registered for.
+  #
+  # Taking the subject first is what keeps a publicly registered client honest:
+  # it has no owner row at all, so if the subject were ignored it would resolve
+  # to nothing and be refused.
+  defp account_for(%Token{sub: sub}, _client_id) when is_binary(sub) and sub != "", do: {:ok, sub}
+  defp account_for(_token, client_id), do: owner(client_id)
 
   @doc """
   Records the audience a token was asked for, per RFC 8707.
@@ -177,6 +210,17 @@ defmodule Markdow.OAuth do
   end
 
   defp digest(token), do: :crypto.hash(:sha256, token)
+
+  @doc "The name a client registered under, for showing on the consent page."
+  @spec client_name(String.t() | nil) :: {:ok, String.t()} | {:error, :not_found}
+  def client_name(client_id) when is_binary(client_id) do
+    {:ok, Admin.get_client!(client_id).name}
+  rescue
+    # Includes a malformed identifier, which Ecto refuses to cast to a UUID.
+    _exception -> {:error, :not_found}
+  end
+
+  def client_name(_client_id), do: {:error, :not_found}
 
   @doc "The account a registered client acts for, if it has one."
   @spec owner(String.t()) :: {:ok, String.t()} | {:error, :invalid_token}

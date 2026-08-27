@@ -133,6 +133,11 @@ defmodule MarkdowWeb.Router do
   scope "/", MarkdowWeb do
     pipe_through :agent_claim
 
+    get "/oauth2/authorize", OAuthAuthorizeController, :show
+    post "/oauth2/authorize/sign-in", OAuthAuthorizeController, :sign_in
+    post "/oauth2/authorize/approve", OAuthAuthorizeController, :approve
+    post "/oauth2/authorize/deny", OAuthAuthorizeController, :deny
+
     get "/agent/identity/claim", ClaimController, :show
     post "/agent/identity/claim/sign-up", ClaimController, :sign_up
     post "/agent/identity/claim/sign-in", ClaimController, :sign_in
