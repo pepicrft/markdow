@@ -64,6 +64,53 @@ defmodule MarkdowWeb.DocumentApiTest do
     assert [%{"path" => "Wiki/Cloud Primitives Are the Wrong Shape"}] = results
   end
 
+  test "stores an empty Markdown note the way Obsidian creates it", %{index: index} do
+    path = "Daily Notes/2026-08-27.md"
+    encoded_path = encode_path(path)
+
+    stored =
+      index
+      |> request(:put, "/vaults/default/documents/#{encoded_path}", %{
+        "data_base64" => Base.encode64("")
+      })
+      |> json_response(200)
+
+    assert stored["path"] == path
+    assert stored["kind"] == "note"
+
+    listed =
+      index
+      |> request(:get, "/vaults/default/documents", nil)
+      |> json_response(200)
+
+    assert Enum.any?(listed, &(&1["path"] == path))
+
+    read =
+      index
+      |> request(:get, "/vaults/default/documents/#{encoded_path}", nil)
+      |> json_response(200)
+
+    assert Base.decode64!(read["data_base64"]) == ""
+  end
+
+  test "keeps a whitespace-only note intact rather than reading it as absent", %{index: index} do
+    path = "Inbox/Scratch Pad.md"
+    encoded_path = encode_path(path)
+
+    index
+    |> request(:put, "/vaults/default/documents/#{encode_path(path)}", %{
+      "data_base64" => Base.encode64("\n\n")
+    })
+    |> json_response(200)
+
+    read =
+      index
+      |> request(:get, "/vaults/default/documents/#{encoded_path}", nil)
+      |> json_response(200)
+
+    assert Base.decode64!(read["data_base64"]) == "\n\n"
+  end
+
   defp request(index, method, path, body),
     do: DataCase.endpoint_conn(method, path, body, index, "test")
 

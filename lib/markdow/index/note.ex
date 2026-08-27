@@ -21,8 +21,20 @@ defmodule Markdow.Index.Note do
 
   def changeset(note, attrs) do
     note
-    |> cast(attrs, [:vault_id, :id, :title, :path, :body, :metadata])
-    |> validate_required([:vault_id, :id, :title, :path, :body, :metadata])
+    |> cast(attrs, [:vault_id, :id, :title, :path, :body, :metadata], empty_values: [])
+    |> validate_required([:vault_id, :id, :title, :path, :metadata])
+    |> validate_body()
     |> unique_constraint([:vault_id, :path])
+  end
+
+  # An empty note is a real note: Obsidian writes one every time somebody creates
+  # a page and does not type in it yet, and a vault carries them by the dozen.
+  # `validate_required/3` counts "" and whitespace as missing, so the body is
+  # checked for presence rather than for content, and `cast/4` keeps the bytes it
+  # would otherwise discard as empty.
+  defp validate_body(changeset) do
+    if is_binary(get_field(changeset, :body)),
+      do: changeset,
+      else: add_error(changeset, :body, "can't be blank", validation: :required)
   end
 end
