@@ -70,6 +70,17 @@ defmodule MarkdowWeb.AccountApiTest do
     assert revocation == %{"revoked" => 0, "user_id" => "grace"}
   end
 
+  test "refuses new users while registrations are closed", %{index: index} do
+    closed_index = %{index | signups_enabled: false}
+
+    response =
+      closed_index
+      |> request(:post, "/users", %{"email" => "new@example.com"})
+      |> json_response(403)
+
+    assert response == %{"error" => "signups_disabled"}
+  end
+
   test "does not cache protected responses", %{index: index} do
     response = DataCase.endpoint_conn(:get, "/users", nil, index, "test")
 

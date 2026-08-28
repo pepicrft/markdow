@@ -111,7 +111,11 @@ defmodule Markdow.MCP do
         scopes when is_list(scopes) -> scopes
       end
 
-    if required_scope in granted,
+    # [Model Context Protocol](https://modelcontextprotocol.io/) clients
+    # commonly request only the protocol's `mcp` scope after following this
+    # endpoint's challenge. That scope grants access to the published tools,
+    # but every tool still enforces the account and vault named in its arguments.
+    if required_scope in granted or "mcp" in granted,
       do: :ok,
       else: {:error, :insufficient_scope}
   end

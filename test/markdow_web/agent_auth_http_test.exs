@@ -31,6 +31,7 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
 
     assert metadata["code_challenge_methods_supported"] == ["S256"]
     assert metadata["token_endpoint_auth_methods_supported"] == ["none"]
+    refute "users:write" in metadata["scopes_supported"]
   end
 
   test "emails a link, authenticates its owner, and confirms only that owner's claim", %{
@@ -102,6 +103,50 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
       |> json()
 
     assert token["access_token"]
+  end
+
+  test "keeps existing accounts available while registrations are closed", %{index: index} do
+    index = %{index | email_notifier: __MODULE__.Mailbox, signups_enabled: false}
+
+    assert {:ok, existing} =
+             Accounts.create_user(%{"email" => "existing@example.com"}, index.repo)
+
+    existing_response =
+      DataCase.browser_conn(
+        :post,
+        "/accounts/log-in",
+        %{"email" => existing.email},
+        index
+      )
+
+    assert existing_response.status == 200
+    assert_receive {:email_link, "existing@example.com", _login_url}
+
+    blocked_response =
+      DataCase.browser_conn(
+        :post,
+        "/accounts/log-in",
+        %{"email" => "new@example.com"},
+        index
+      )
+
+    assert blocked_response.status == 403
+    assert blocked_response.resp_body =~ "New registrations are closed."
+    assert Accounts.get_user_by_email("new@example.com", index.repo) == {:error, :not_found}
+  end
+
+  test "does not create an account for an agent claim while registrations are closed", %{
+    index: index
+  } do
+    registration = register(index, "new-agent@example.com")
+    claim_path = registration["claim"]["verification_uri"] |> URI.parse() |> request_path()
+    closed_index = %{index | signups_enabled: false}
+
+    response = DataCase.browser_conn(:get, claim_path, nil, closed_index)
+
+    assert response.status == 403
+    assert response.resp_body =~ "New registrations are closed"
+    assert Accounts.get_user_by_email("new-agent@example.com", index.repo) == {:error, :not_found}
   end
 
   defp register(index, email) do

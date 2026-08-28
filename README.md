@@ -53,3 +53,5 @@ mise exec -- mix precommit
 The production image and Helm chart are published after the checks pass on `main`. The chart lives in `deploy/helm/markdow`, and the Pepicrft production values live in `deploy/values-production.yaml`.
 
 Production configuration is read from `MARKDOW_*` environment variables. Required secrets include the database address, application key, signing key, a dedicated secret for hashing agent confirmation codes, and the secret used to encrypt embedding provider tokens.
+
+Set `MARKDOW_SIGNUPS_ENABLED=false` to allow only existing accounts to sign in. The default is `true`; any value other than `true` or `1` disables new registrations.

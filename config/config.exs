@@ -7,6 +7,7 @@ config :markdow,
   allowed_mcp_origins: ["http://localhost:4000", "http://127.0.0.1:4000"],
   embedding_secret_key: "0123456789abcdef0123456789abcdef",
   marketing_routes: true,
+  signups_enabled: true,
   legal: [
     operator_name: "Markdow development instance",
     operator_address: "Not a public deployment",

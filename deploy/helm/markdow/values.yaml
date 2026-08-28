@@ -47,6 +47,7 @@ extraEnv:
   MARKDOW_EMAIL_FROM_ADDRESS: markdow@pepicrft.me
   MARKDOW_EMAIL_FROM_NAME: Markdow
   MARKDOW_MARKETING_ROUTES: "true"
+  MARKDOW_SIGNUPS_ENABLED: "true"
   MARKDOW_OG_BROWSER_POOL_SIZE: "2"
   MARKDOW_SMTP_PORT: "587"
   MARKDOW_SMTP_RELAY: smtp-relay.smtp-relay.svc.cluster.local

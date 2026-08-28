@@ -53,7 +53,7 @@ defmodule MarkdowWeb.DiscoveryController do
       resource: origin <> "/mcp",
       resource_name: "Markdow Model Context Protocol server",
       authorization_servers: [origin],
-      scopes_supported: AgentAuth.scopes(),
+      scopes_supported: OAuth.scopes(),
       bearer_methods_supported: ["header"],
       resource_documentation: origin <> "/auth.md"
     })
@@ -65,7 +65,7 @@ defmodule MarkdowWeb.DiscoveryController do
     json(conn, %{
       resource: origin,
       authorization_servers: [origin],
-      scopes_supported: AgentAuth.scopes(),
+      scopes_supported: OAuth.scopes(),
       bearer_methods_supported: ["header"],
       issuer: origin,
       authorization_endpoint: origin <> "/oauth2/authorize",
@@ -129,7 +129,7 @@ defmodule MarkdowWeb.DiscoveryController do
       resource: origin,
       resource_name: "Markdow note interface",
       authorization_servers: [origin],
-      scopes_supported: AgentAuth.scopes(),
+      scopes_supported: OAuth.scopes(),
       bearer_methods_supported: ["header"],
       resource_documentation: origin <> "/auth.md"
     }

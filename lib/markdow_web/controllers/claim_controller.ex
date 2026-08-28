@@ -32,7 +32,10 @@ defmodule MarkdowWeb.ClaimController do
          properties: %{claim_attempt_token: %Schema{type: :string}},
          required: [:claim_attempt_token]
        }},
-    responses: [ok: {"Email sent", "text/html", %Schema{type: :string}}]
+    responses: [
+      ok: {"Email sent", "text/html", %Schema{type: :string}},
+      forbidden: {"Sign-ups are disabled", "text/html", %Schema{type: :string}}
+    ]
 
   operation :confirm,
     operation_id: "confirm_agent_claim",
@@ -131,7 +134,11 @@ defmodule MarkdowWeb.ClaimController do
     conn = put_session(conn, :markdow_user_return_to, claim_path(token))
 
     with {:ok, user} <-
-           Accounts.find_or_create_by_email(registration.claim_email, index(conn).repo),
+           Accounts.find_or_create_by_email(
+             registration.claim_email,
+             index(conn).repo,
+             signups_enabled: index(conn).signups_enabled
+           ),
          {:ok, _email} <-
            Accounts.deliver_login_link(
              user,
@@ -142,6 +149,9 @@ defmodule MarkdowWeb.ClaimController do
       {:ok, conn}
     end
   end
+
+  defp render_delivery_error(conn, _token, :signups_disabled),
+    do: send_page(conn, 403, signups_closed_page())
 
   defp render_delivery_error(conn, token, _reason) do
     Logger.error("Agent claim email could not be delivered")
@@ -220,6 +230,13 @@ defmodule MarkdowWeb.ClaimController do
     <h1>Access unavailable</h1>
     <p data-part="lead">This request is invalid, expired, or could not be confirmed.</p>
     <p data-part="notice">Ask the agent to start a new request, then open the fresh link it gives you.</p>
+    """)
+  end
+
+  defp signups_closed_page do
+    page("""
+    <h1>Access unavailable</h1>
+    <p data-part="lead">New registrations are closed on this Markdow instance.</p>
     """)
   end
 

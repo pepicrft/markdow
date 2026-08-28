@@ -28,6 +28,7 @@ port =
   end
 
 marketing_routes = System.get_env("MARKDOW_MARKETING_ROUTES", "true") in ~w(true 1)
+signups_enabled = System.get_env("MARKDOW_SIGNUPS_ENABLED", "true") in ~w(true 1)
 rate_limit_window = String.to_integer(System.get_env("MARKDOW_RATE_LIMIT_WINDOW_MS", "60000"))
 
 public_host =
@@ -248,6 +249,7 @@ config :markdow,
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == "")),
   marketing_routes: marketing_routes,
+  signups_enabled: signups_enabled,
   legal: legal,
   rate_limits: [
     marketing: [

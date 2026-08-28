@@ -52,7 +52,7 @@ defmodule MarkdowWeb.AuthMarkdownController do
     #{origin}/oauth2/authorize?response_type=code&client_id=<client_id>&redirect_uri=<registered_redirect_uri>&scope=mcp%20vaults:read%20notes:read&resource=#{origin}/mcp&state=<state>&code_challenge=<S256_challenge>&code_challenge_method=S256
     ```
 
-    If the user is not signed in, Markdow asks for their email and sends a one-time sign-in link. Opening the link authenticates that email address. Markdow then shows the requested scopes and requires an explicit confirmation before redirecting to the registered callback with a short-lived authorization code.
+    If the user is not signed in, Markdow asks for their email and sends a one-time sign-in link. Opening the link authenticates that email address. Markdow then shows the requested scopes and requires an explicit confirmation before redirecting to the registered callback with a short-lived authorization code. For the [Model Context Protocol](https://modelcontextprotocol.io/), the `mcp` scope authorizes its published tools for that account; each tool still checks the account and vault it receives.
 
     ## Exchange the authorization code
 

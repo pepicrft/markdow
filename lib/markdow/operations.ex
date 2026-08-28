@@ -326,7 +326,7 @@ defmodule Markdow.Operations do
   def call("get_user", %{"id" => id}, index), do: Accounts.get_user(id, index.repo)
 
   def call("create_user", %{"email" => _email} = arguments, index),
-    do: Accounts.create_user(arguments, index.repo)
+    do: Accounts.create_user(arguments, index.repo, signups_enabled: index.signups_enabled)
 
   def call("revoke_agent_credentials", %{"user_id" => user_id}, index) do
     with {:ok, count} <- AgentAuth.revoke_user_access_tokens(user_id, index: index),

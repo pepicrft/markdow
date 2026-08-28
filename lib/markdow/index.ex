@@ -20,6 +20,7 @@ defmodule Markdow.Index do
   alias Markdow.Index.Tag
   alias Markdow.Markdown
   alias Markdow.Repo
+  alias Markdow.Signups
   alias Markdow.Storage
   alias Markdow.Storage.LocalFs
 
@@ -35,6 +36,7 @@ defmodule Markdow.Index do
       storage: Keyword.get(opts, :storage, {LocalFs, LocalFs}),
       embedding_client: Keyword.get(opts, :embedding_client, Markdow.Embeddings.OpenAI),
       email_notifier: Keyword.get(opts, :email_notifier, Markdow.Accounts.EmailNotifier),
+      signups_enabled: Signups.enabled?(opts),
       embedding_secret_key:
         Keyword.get(
           opts,

@@ -85,6 +85,19 @@ defmodule Markdow.OperationsTest do
     assert Operations.call("does_not_exist", %{}, index) == {:error, :unknown_operation}
   end
 
+  test "does not create users through the shared operation catalog while registrations are closed",
+       %{
+         index: index
+       } do
+    closed_index = %{index | signups_enabled: false}
+
+    assert Operations.call(
+             "create_user",
+             %{"email" => "new@example.com"},
+             closed_index
+           ) == {:error, :signups_disabled}
+  end
+
   test "round-trips path-preserving Markdown and binary documents", %{index: index} do
     markdown = "# Same name\n\nThe folder remains part of the identity."
     image = <<0, 255, 12, 10, 200>>

@@ -1,8 +1,10 @@
 defmodule MarkdowWeb.McpTest do
   use Markdow.DataCase, async: true
 
+  alias Markdow.Accounts
   alias Markdow.DataCase
   alias Markdow.Embeddings.OpenAI
+  alias Markdow.MCP
   alias Markdow.Operations
 
   setup :verify_on_exit!
@@ -44,6 +46,69 @@ defmodule MarkdowWeb.McpTest do
 
     assert Enum.map(tools, & &1["name"]) == Operations.names()
     assert Enum.all?(tools, &is_map(&1["inputSchema"]))
+  end
+
+  test "the Model Context Protocol scope grants account-bound tool access", %{index: index} do
+    assert {:ok, user} =
+             Accounts.create_user(
+               %{"id" => "mcp-owner", "email" => "owner@example.com"},
+               index.repo
+             )
+
+    assert {:ok, vault} =
+             Accounts.create_vault(user.id, %{"id" => "mcp-vault", "name" => "Vault"}, index.repo)
+
+    assert {:ok, stranger} =
+             Accounts.create_user(
+               %{"id" => "stranger", "email" => "stranger@example.com"},
+               index.repo
+             )
+
+    request = %{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "method" => "tools/call",
+      "params" => %{
+        "name" => "list_vaults",
+        "arguments" => %{"user_id" => user.id}
+      }
+    }
+
+    response =
+      :post
+      |> Plug.Test.conn("/mcp")
+      |> Map.put(:body_params, request)
+      |> Plug.Conn.put_private(:markdow_index, index)
+      |> Plug.Conn.assign(:authorization, %{kind: :access_token, scopes: "mcp", user_id: user.id})
+      |> MCP.call([])
+
+    assert response.status == 200
+
+    assert %{"result" => %{"structuredContent" => %{"result" => [listed_vault]}}} =
+             JSON.decode!(response.resp_body)
+
+    assert listed_vault["id"] == vault.id
+
+    blocked_response =
+      request
+      |> put_in(["params", "arguments", "user_id"], stranger.id)
+      |> then(fn body ->
+        :post
+        |> Plug.Test.conn("/mcp")
+        |> Map.put(:body_params, body)
+        |> Plug.Conn.put_private(:markdow_index, index)
+        |> Plug.Conn.assign(:authorization, %{
+          kind: :access_token,
+          scopes: "mcp",
+          user_id: user.id
+        })
+        |> MCP.call([])
+      end)
+
+    blocked_result = JSON.decode!(blocked_response.resp_body)["result"]
+
+    assert blocked_result["isError"]
+    assert get_in(blocked_result, ["content", Access.at(0), "text"]) == "forbidden"
   end
 
   test "manages a linked vault through tools", %{index: index} do

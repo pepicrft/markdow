@@ -7,6 +7,7 @@ defmodule Markdow.Accounts do
   alias Markdow.Accounts.User
   alias Markdow.Accounts.Vault
   alias Markdow.Repo
+  alias Markdow.Signups
 
   @default_user_id "local"
   @default_vault_id "default"
@@ -38,21 +39,26 @@ defmodule Markdow.Accounts do
     end
   end
 
-  @spec create_user(map(), module()) :: {:ok, map()} | {:error, term()}
-  def create_user(attrs, repo \\ Repo) when is_map(attrs) do
-    attrs = Map.put_new(attrs, "id", generated_id("usr"))
+  @spec create_user(map(), module(), keyword()) :: {:ok, map()} | {:error, term()}
+  def create_user(attrs, repo \\ Repo, opts \\ []) when is_map(attrs) and is_list(opts) do
+    if Signups.enabled?(opts) do
+      attrs = Map.put_new(attrs, "id", generated_id("usr"))
 
-    %User{}
-    |> User.changeset(attrs)
-    |> repo.insert()
-    |> map_record(&user_map/1)
+      %User{}
+      |> User.changeset(attrs)
+      |> repo.insert()
+      |> map_record(&user_map/1)
+    else
+      {:error, :signups_disabled}
+    end
   end
 
   @doc "Finds an account by email or creates its passwordless shell."
-  @spec find_or_create_by_email(String.t(), module()) :: {:ok, map()} | {:error, term()}
-  def find_or_create_by_email(email, repo \\ Repo)
+  @spec find_or_create_by_email(String.t(), module(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def find_or_create_by_email(email, repo \\ Repo, opts \\ [])
 
-  def find_or_create_by_email(email, repo) when is_binary(email) do
+  def find_or_create_by_email(email, repo, opts) when is_binary(email) and is_list(opts) do
     normalized_email = normalize_email(email)
 
     case repo.get_by(User, email: normalized_email) do
@@ -60,7 +66,7 @@ defmodule Markdow.Accounts do
         {:ok, user_map(user)}
 
       nil ->
-        case create_user(%{"email" => normalized_email}, repo) do
+        case create_user(%{"email" => normalized_email}, repo, opts) do
           {:ok, user} ->
             {:ok, user}
 
@@ -73,28 +79,28 @@ defmodule Markdow.Accounts do
     end
   end
 
-  def find_or_create_by_email(_email, _repo), do: {:error, :invalid_email}
+  def find_or_create_by_email(_email, _repo, _opts), do: {:error, :invalid_email}
 
-  @spec claim_user(String.t(), String.t(), String.t(), module()) ::
+  @spec claim_user(String.t(), String.t(), String.t(), module(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def claim_user(email, name, password, repo \\ Repo)
+  def claim_user(email, name, password, repo \\ Repo, opts \\ [])
 
-  def claim_user(email, name, password, repo)
-      when is_binary(email) and is_binary(name) and is_binary(password) do
+  def claim_user(email, name, password, repo, opts)
+      when is_binary(email) and is_binary(name) and is_binary(password) and is_list(opts) do
     email = normalize_email(email)
 
     result =
       repo.transaction(fn ->
         email
         |> locked_user(repo)
-        |> claim_locked_user(email, name, password, repo)
+        |> claim_locked_user(email, name, password, repo, opts)
         |> unwrap_claim(repo)
       end)
 
     normalize_claim_transaction(result)
   end
 
-  def claim_user(_email, _name, _password, _repo), do: {:error, :invalid_request}
+  def claim_user(_email, _name, _password, _repo, _opts), do: {:error, :invalid_request}
 
   @spec authenticate_user(String.t(), String.t(), module()) ::
           {:ok, map()} | {:error, :invalid_credentials}
@@ -245,18 +251,22 @@ defmodule Markdow.Accounts do
     repo.one(from(user in User, where: user.email == ^email, lock: "FOR UPDATE"))
   end
 
-  defp claim_locked_user(nil, email, name, password, repo) do
-    %User{}
-    |> User.agent_signup_changeset(%{
-      "id" => generated_id("usr"),
-      "email" => email,
-      "name" => name,
-      "password" => password
-    })
-    |> repo.insert()
+  defp claim_locked_user(nil, email, name, password, repo, opts) do
+    if Signups.enabled?(opts) do
+      %User{}
+      |> User.agent_signup_changeset(%{
+        "id" => generated_id("usr"),
+        "email" => email,
+        "name" => name,
+        "password" => password
+      })
+      |> repo.insert()
+    else
+      {:error, :signups_disabled}
+    end
   end
 
-  defp claim_locked_user(%User{}, _email, _name, _password, _repo) do
+  defp claim_locked_user(%User{}, _email, _name, _password, _repo, _opts) do
     Argon2.no_user_verify()
     {:error, :account_exists}
   end

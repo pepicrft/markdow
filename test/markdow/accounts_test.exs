@@ -50,6 +50,35 @@ defmodule Markdow.AccountsTest do
     assert "has invalid format" in errors_on(changeset).id
   end
 
+  test "blocks every new-account path while registrations are closed" do
+    closed = [signups_enabled: false]
+
+    assert Accounts.create_user(%{"email" => "new@example.com"}, Repo, closed) ==
+             {:error, :signups_disabled}
+
+    assert Accounts.find_or_create_by_email("new@example.com", Repo, closed) ==
+             {:error, :signups_disabled}
+
+    assert Accounts.claim_user(
+             "agent@example.com",
+             "Agent",
+             "correct horse battery staple",
+             Repo,
+             closed
+           ) == {:error, :signups_disabled}
+
+    assert Accounts.get_user_by_email("new@example.com", Repo) == {:error, :not_found}
+    assert Accounts.get_user_by_email("agent@example.com", Repo) == {:error, :not_found}
+
+    assert {:ok, existing} =
+             Accounts.create_user(%{"email" => "existing@example.com"}, Repo)
+
+    assert {:ok, signed_in} =
+             Accounts.find_or_create_by_email(existing.email, Repo, closed)
+
+    assert signed_in.id == existing.id
+  end
+
   test "creates and authenticates an account initiated by an agent" do
     assert {:ok, user} =
              Accounts.claim_user(

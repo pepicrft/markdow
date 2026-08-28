@@ -24,6 +24,10 @@ defmodule MarkdowWeb.ApiResponse do
     conn |> put_status(403) |> json(%{error: "forbidden"})
   end
 
+  def send_result(conn, {:error, :signups_disabled}, _success_status) do
+    conn |> put_status(403) |> json(%{error: "signups_disabled"})
+  end
+
   def send_result(conn, {:error, reason}, _success_status)
       when reason in [
              :invalid_arguments,

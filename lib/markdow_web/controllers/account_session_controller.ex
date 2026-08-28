@@ -29,7 +29,10 @@ defmodule MarkdowWeb.AccountSessionController do
          properties: %{email: %Schema{type: :string, format: :email}},
          required: [:email]
        }},
-    responses: [ok: {"Email sent", "text/html", %Schema{type: :string}}]
+    responses: [
+      ok: {"Email sent", "text/html", %Schema{type: :string}},
+      forbidden: {"Sign-ups are disabled", "text/html", %Schema{type: :string}}
+    ]
 
   operation :confirm,
     operation_id: "consume_email_login",
@@ -46,6 +49,9 @@ defmodule MarkdowWeb.AccountSessionController do
 
       {:error, %Ecto.Changeset{}} ->
         send_page(conn, 422, login_page(email, "Enter a valid email address."))
+
+      {:error, :signups_disabled} ->
+        send_page(conn, 403, login_page(email, "New registrations are closed."))
 
       {:error, _reason} ->
         Logger.error("Email login link could not be delivered")
@@ -74,7 +80,12 @@ defmodule MarkdowWeb.AccountSessionController do
   end
 
   defp send_login_link(email, conn) do
-    with {:ok, user} <- Accounts.find_or_create_by_email(email, index(conn).repo),
+    with {:ok, user} <-
+           Accounts.find_or_create_by_email(
+             email,
+             index(conn).repo,
+             signups_enabled: index(conn).signups_enabled
+           ),
          {:ok, _email} <-
            Accounts.deliver_login_link(
              user,

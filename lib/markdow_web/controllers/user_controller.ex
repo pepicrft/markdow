@@ -33,7 +33,10 @@ defmodule MarkdowWeb.UserController do
     operation_id: "create_user",
     summary: "Create a user",
     request_body: {"User", "application/json", UserInput},
-    responses: [created: {"Created user", "application/json", User}]
+    responses: [
+      created: {"Created user", "application/json", User},
+      forbidden: {"Sign-ups are disabled", "application/json", %Schema{type: :object}}
+    ]
 
   operation :revoke_agent_credentials,
     operation_id: "revoke_agent_credentials",
