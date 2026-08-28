@@ -19,7 +19,8 @@ defmodule Markdow.Embeddings.Configuration do
           token_iv: binary(),
           token_tag: binary(),
           token_suffix: String.t(),
-          validated_at: DateTime.t() | nil
+          validated_at: DateTime.t() | nil,
+          connection_target: map() | nil
         }
 
   schema "user_embedding_configurations" do
@@ -32,6 +33,7 @@ defmodule Markdow.Embeddings.Configuration do
     field(:token_tag, :binary)
     field(:token_suffix, :string)
     field(:validated_at, :utc_datetime_usec)
+    field(:connection_target, :map, virtual: true)
 
     timestamps()
   end

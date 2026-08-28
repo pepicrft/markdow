@@ -1,26 +1,11 @@
 defmodule Markdow.Embeddings.EndpointPolicyTest do
-  # The allow-list lives in application environment, which is global.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Markdow.Embeddings.EndpointPolicy
 
   # Address literals throughout, so nothing here depends on a name server.
   # 203.0.113.0/24 is the documentation range and counts as public.
   @public "https://203.0.113.10/v1/embeddings"
-
-  setup do
-    original = Application.fetch_env(:markdow, :embeddings_allowed_hosts)
-
-    on_exit(fn ->
-      case original do
-        {:ok, hosts} -> Application.put_env(:markdow, :embeddings_allowed_hosts, hosts)
-        :error -> Application.delete_env(:markdow, :embeddings_allowed_hosts)
-      end
-    end)
-
-    Application.delete_env(:markdow, :embeddings_allowed_hosts)
-    :ok
-  end
 
   test "accepts a public https endpoint" do
     assert {:ok, %URI{}} = EndpointPolicy.check(@public)
@@ -72,11 +57,14 @@ defmodule Markdow.Embeddings.EndpointPolicyTest do
   end
 
   test "lets an operator exempt a host it runs itself" do
-    Application.put_env(:markdow, :embeddings_allowed_hosts, ["bifrost.bifrost.svc.cluster.local"])
+    opts = [allowed_hosts: ["bifrost.bifrost.svc.cluster.local"]]
 
     # Exempt by name, including over plain text inside a trusted network.
     assert {:ok, %URI{}} =
-             EndpointPolicy.check("http://bifrost.bifrost.svc.cluster.local:8080/v1/embeddings")
+             EndpointPolicy.check(
+               "http://bifrost.bifrost.svc.cluster.local:8080/v1/embeddings",
+               opts
+             )
 
     # The exemption is for that host only, not for private addresses at large.
     assert EndpointPolicy.check("https://10.0.0.5/v1/embeddings") ==
@@ -84,9 +72,23 @@ defmodule Markdow.Embeddings.EndpointPolicyTest do
   end
 
   test "matches an exempted host regardless of letter case" do
-    Application.put_env(:markdow, :embeddings_allowed_hosts, ["Gateway.Internal"])
+    assert {:ok, %URI{}} =
+             EndpointPolicy.check("https://gateway.internal/v1/embeddings",
+               allowed_hosts: ["Gateway.Internal"]
+             )
+  end
 
-    assert {:ok, %URI{}} = EndpointPolicy.check("https://gateway.internal/v1/embeddings")
+  test "returns the checked address as the connection target" do
+    resolver = fn "provider.example" -> {:ok, [{203, 0, 113, 10}]} end
+
+    assert {:ok,
+            %{
+              uri: %URI{host: "provider.example", path: "/v1/embeddings"},
+              addresses: [{203, 0, 113, 10}]
+            }} =
+             EndpointPolicy.resolve_endpoint("https://provider.example/v1/embeddings",
+               resolver: resolver
+             )
   end
 
   test "refuses loopback written as an integer, in octal, and in hexadecimal" do
