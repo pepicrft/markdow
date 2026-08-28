@@ -443,31 +443,45 @@ defmodule Markdow.Index do
 
   defp persist_note(index, vault_id, id, body, opts) do
     with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo) do
-      storage_id = Accounts.storage_key(vault, id)
-      parsed = Markdown.parse(id, body, opts)
-      previous = Storage.read_note(index.storage, storage_id)
-
-      case Storage.write_note(index.storage, storage_id, body) do
-        :ok -> persist_note_index(index, vault_id, id, body, parsed, storage_id, previous)
-        {:error, reason} -> {:error, reason}
-      end
+      persist_vault_note(index, vault, vault_id, id, body, opts)
     end
   end
 
-  defp persist_note_index(index, vault_id, id, body, parsed, storage_id, previous) do
-    result =
-      transaction(index.repo, fn ->
-        with :ok <- acquire_write_lock(index.repo),
-             :ok <- upsert_note(index.repo, vault_id, id, body, parsed),
+  defp persist_vault_note(index, vault, vault_id, id, body, opts) do
+    storage_id = Accounts.storage_key(vault, id)
+    parsed = Markdown.parse(id, body, opts)
+
+    transaction(index.repo, fn ->
+      persist_note_transaction(index, vault_id, id, body, parsed, storage_id)
+    end)
+  end
+
+  defp persist_note_transaction(index, vault_id, id, body, parsed, storage_id) do
+    with :ok <- acquire_write_lock(index.repo) do
+      previous = Storage.read_note(index.storage, storage_id)
+
+      persist_note_locked(index, vault_id, id, body, parsed, storage_id, previous)
+    end
+  end
+
+  # Storage changes and their index transaction share the same advisory lock.
+  # The file must be written before it can be read back into the response, but
+  # restoring a rejected write before releasing the lock prevents another
+  # replica from committing a newer index row against the restored old file.
+  defp persist_note_locked(index, vault_id, id, body, parsed, storage_id, previous) do
+    case Storage.write_note(index.storage, storage_id, body) do
+      :ok ->
+        with :ok <- upsert_note(index.repo, vault_id, id, body, parsed),
              :ok <- replace_tags(index.repo, vault_id, id, parsed.tags),
              :ok <- refresh_links(index.repo, vault_id) do
           fetch_note(index, vault_id, id)
+        else
+          {:error, reason} ->
+            restore_persisted_note(index.storage, storage_id, previous, reason)
         end
-      end)
 
-    case result do
-      {:ok, note} -> {:ok, note}
-      {:error, reason} -> restore_persisted_note(index.storage, storage_id, previous, reason)
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -509,56 +523,56 @@ defmodule Markdow.Index do
   end
 
   defp remove_note(index, vault_id, id) do
-    case fetch_note(index, vault_id, id) do
-      {:ok, %{body: body}} -> remove_stored_note(index, vault_id, id, body)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp remove_stored_note(index, vault_id, id, body) do
     with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo) do
-      storage_id = Accounts.storage_key(vault, id)
-
-      case Storage.delete_note(index.storage, storage_id) do
-        :ok -> remove_indexed_note(index, vault_id, id, storage_id, body)
-        {:error, reason} -> {:error, reason}
-      end
+      remove_vault_note(index, vault, vault_id, id)
     end
   end
 
-  defp remove_indexed_note(index, vault_id, id, storage_id, body) do
-    result =
-      transaction(index.repo, fn ->
-        with :ok <- acquire_write_lock(index.repo) do
-          index.repo.delete_all(
-            from(note in Note, where: note.vault_id == ^vault_id and note.id == ^id)
-          )
+  defp remove_vault_note(index, vault, vault_id, id) do
+    storage_id = Accounts.storage_key(vault, id)
+    transaction(index.repo, fn -> remove_note_transaction(index, vault_id, id, storage_id) end)
+  end
 
-          :ok
-        end
-      end)
+  defp remove_note_transaction(index, vault_id, id, storage_id) do
+    with :ok <- acquire_write_lock(index.repo),
+         {:ok, _note} <- fetch_note(index, vault_id, id) do
+      remove_note_locked(index, vault_id, id, storage_id)
+    end
+  end
 
-    case result do
-      :ok -> :ok
-      {:error, reason} -> restore_removed_note(index.storage, storage_id, body, reason)
+  defp remove_note_locked(index, vault_id, id, storage_id) do
+    case Storage.delete_note(index.storage, storage_id) do
+      :ok ->
+        index.repo.delete_all(
+          from(note in Note, where: note.vault_id == ^vault_id and note.id == ^id)
+        )
+
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   defp rebuild(index, vault_id) do
-    with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo),
-         {:ok, storage_ids} <- Storage.list_notes(index.storage) do
-      ids = vault_note_ids(vault, storage_ids)
-      transaction(index.repo, fn -> rebuild_index(index, vault_id, vault, ids) end)
+    with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo) do
+      transaction(index.repo, fn -> rebuild_transaction(index, vault_id, vault) end)
     end
   end
 
-  defp rebuild_index(index, vault_id, vault, ids) do
-    with :ok <- acquire_write_lock(index.repo) do
-      index.repo.delete_all(from(note in Note, where: note.vault_id == ^vault_id))
+  defp rebuild_transaction(index, vault_id, vault) do
+    with :ok <- acquire_write_lock(index.repo),
+         {:ok, storage_ids} <- Storage.list_notes(index.storage) do
+      ids = vault_note_ids(vault, storage_ids)
+      rebuild_index_locked(index, vault_id, vault, ids)
+    end
+  end
 
-      with :ok <- index_storage_notes(index, vault_id, vault, ids) do
-        refresh_links(index.repo, vault_id)
-      end
+  defp rebuild_index_locked(index, vault_id, vault, ids) do
+    index.repo.delete_all(from(note in Note, where: note.vault_id == ^vault_id))
+
+    with :ok <- index_storage_notes(index, vault_id, vault, ids) do
+      refresh_links(index.repo, vault_id)
     end
   end
 
@@ -808,11 +822,6 @@ defmodule Markdow.Index do
   defp restore_storage(storage, id, {:ok, body}), do: Storage.write_note(storage, id, body)
   defp restore_storage(storage, id, {:error, :enoent}), do: Storage.delete_note(storage, id)
   defp restore_storage(_storage, _id, _previous), do: :ok
-
-  defp restore_removed_note(storage, id, body, reason) do
-    Storage.write_note(storage, id, body)
-    {:error, reason}
-  end
 
   defp perform_agent_auth(index, {:registration_count_since, since, address}) do
     query = from(registration in Registration, where: registration.created_at >= ^since)
