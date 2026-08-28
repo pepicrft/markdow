@@ -124,10 +124,25 @@ agent_auth_private_key =
       value
   end
 
+agent_auth_user_code_hmac_key =
+  case {config_env(), System.get_env("MARKDOW_AGENT_AUTH_USER_CODE_HMAC_KEY")} do
+    {:prod, nil} ->
+      raise "environment variable MARKDOW_AGENT_AUTH_USER_CODE_HMAC_KEY is missing"
+
+    {:prod, value} when byte_size(value) < 32 ->
+      raise "MARKDOW_AGENT_AUTH_USER_CODE_HMAC_KEY must contain at least 32 bytes in production"
+
+    {_environment, nil} ->
+      api_key
+
+    {_environment, value} ->
+      value
+  end
+
 embedding_secret_key =
   case {config_env(), System.get_env("MARKDOW_EMBEDDING_SECRET_KEY")} do
     {:prod, nil} ->
-      nil
+      raise "environment variable MARKDOW_EMBEDDING_SECRET_KEY is missing"
 
     {_environment, nil} ->
       "0123456789abcdef0123456789abcdef"
@@ -208,12 +223,24 @@ if config_env() == :prod do
       System.get_env("MARKDOW_SECRET_KEY_BASE") ||
         raise("environment variable MARKDOW_SECRET_KEY_BASE is missing")
 
+  smtp_relay = System.get_env("MARKDOW_SMTP_RELAY", "smtp-relay.pepicrft.me")
+
   config :markdow, Markdow.Mailer,
     adapter: Swoosh.Adapters.SMTP,
-    relay: System.get_env("MARKDOW_SMTP_RELAY", "smtp-relay.pepicrft.me"),
+    relay: smtp_relay,
     port: String.to_integer(System.get_env("MARKDOW_SMTP_PORT", "587")),
     auth: :never,
-    tls: :never,
+    tls: :always,
+    tls_options: [
+      versions: [:"tlsv1.2", :"tlsv1.3"],
+      verify: :verify_peer,
+      cacerts: :public_key.cacerts_get(),
+      server_name_indication: String.to_charlist(smtp_relay),
+      depth: 99,
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ],
     retries: 2,
     no_mx_lookups: true
 end
@@ -274,6 +301,7 @@ config :markdow,
     access_token_ttl_seconds: 3_600,
     poll_interval_seconds: 5,
     private_key_pem: agent_auth_private_key,
+    user_code_hmac_key: agent_auth_user_code_hmac_key,
     allow_ephemeral_signing_key:
       System.get_env(
         "MARKDOW_AGENT_AUTH_ALLOW_EPHEMERAL_KEY",
