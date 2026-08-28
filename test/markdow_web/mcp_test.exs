@@ -28,6 +28,8 @@ defmodule MarkdowWeb.McpTest do
       })
 
     assert initialized.status == 200
+    assert Plug.Conn.get_resp_header(initialized, "cache-control") == ["no-store"]
+    assert Plug.Conn.get_resp_header(initialized, "pragma") == ["no-cache"]
     # Withholding the header is how a server tells a client it is stateless, and
     # the client then sends none back. Returning one Markdow never stored made
     # every client carry a session that did not exist.

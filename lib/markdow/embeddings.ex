@@ -115,9 +115,11 @@ defmodule Markdow.Embeddings do
 
   # The address is re-checked here rather than trusting what was stored,
   # because the name in a saved configuration can be repointed at an internal
-  # address after it was accepted.
+  # address after it was accepted. The checked addresses travel with the
+  # request, so the client never performs another, untrusted name lookup.
   defp request(index, configuration, token, input) do
-    with {:ok, _uri} <- EndpointPolicy.check(configuration.endpoint) do
+    with {:ok, target} <- EndpointPolicy.resolve_endpoint(configuration.endpoint) do
+      configuration = %{configuration | connection_target: target}
       index.embedding_client.embed(configuration, token, input)
     end
   end

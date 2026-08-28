@@ -13,14 +13,11 @@ defmodule MarkdowWeb.ApiAuth do
 
   @spec call(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def call(conn, opts) do
+    conn = no_store(conn)
     required_scopes = Keyword.get(opts, :scopes, [])
 
     case credential(conn) do
       {:ok, token} -> authenticate(conn, token, required_scopes)
-      # An endpoint marked optional serves callers who present nothing. A
-      # credential that is present and wrong is still refused by
-      # authenticate/3: treating it as anonymous would quietly give a caller
-      # less than they asked for.
       {:error, :missing_token} -> maybe_anonymous(conn, opts, required_scopes)
     end
   end
@@ -39,11 +36,9 @@ defmodule MarkdowWeb.ApiAuth do
       else: unauthorized(conn, "invalid_token", required_scopes)
   end
 
-  # Two kinds of credential reach the same operations. A claim ceremony token is
-  # tried first because it is the one Markdow issues most and the one bound to a
-  # resource, and a registered client's token is tried second. Both resolve to
-  # the same authorization shape, so nothing downstream branches on which was
-  # presented.
+  # Email-confirmed agent access and user-authorized OAuth access both resolve
+  # to the same account-bound authorization shape. Nothing downstream branches
+  # on which credential format was presented.
   #
   # `:insufficient_scope` from the first path is returned rather than retried:
   # the token was recognised and simply did not carry the scope, and turning
@@ -92,5 +87,13 @@ defmodule MarkdowWeb.ApiAuth do
     |> put_resp_content_type("application/json")
     |> send_resp(401, JSON.encode!(%{error: error}))
     |> halt()
+  end
+
+  # Protected responses can contain vault contents, credentials, or account
+  # metadata. Prevent both browser and intermediary caches from retaining them.
+  defp no_store(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("pragma", "no-cache")
   end
 end

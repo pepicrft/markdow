@@ -22,12 +22,12 @@ defmodule MarkdowWeb.DiscoveryController do
 
   operation :authorization_server,
     operation_id: "get_oauth_authorization_server",
-    summary: "Discover auth.md registration and token endpoints",
+    summary: "Discover OAuth authorization endpoints",
     responses: [ok: {"Authorization server metadata", "application/json", %Schema{type: :object}}]
 
   operation :jwks,
     operation_id: "get_agent_auth_signing_keys",
-    summary: "Read public keys for service identity assertions",
+    summary: "Read public keys for legacy service identity assertions",
     responses: [ok: {"Public signing keys", "application/json", %Schema{type: :object}}]
 
   operation :mcp_server_card,
@@ -68,22 +68,15 @@ defmodule MarkdowWeb.DiscoveryController do
       scopes_supported: AgentAuth.scopes(),
       bearer_methods_supported: ["header"],
       issuer: origin,
+      authorization_endpoint: origin <> "/oauth2/authorize",
       token_endpoint: origin <> "/oauth2/token",
       revocation_endpoint: origin <> "/oauth2/revoke",
       registration_endpoint: origin <> "/oauth2/register",
-      authorization_endpoint: origin <> "/oauth2/authorize",
-      response_types_supported: ["code"],
-      # Required rather than offered. A client that registered anonymously
-      # cannot keep a secret, so the code is all that stands between a stolen
-      # redirect and an account.
-      code_challenge_methods_supported: ["S256"],
       grant_types_supported:
-        [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()] ++
-          OAuth.grant_types() ++ ["authorization_code"],
-      # "none" covers the claim and assertion grants, which authenticate the
-      # credential rather than the client. A registered client authenticates
-      # with the secret it was issued.
-      token_endpoint_auth_methods_supported: ["none", "client_secret_basic", "client_secret_post"],
+        [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()] ++ OAuth.grant_types(),
+      response_types_supported: ["code"],
+      code_challenge_methods_supported: ["S256"],
+      token_endpoint_auth_methods_supported: ["none"],
       jwks_uri: origin <> "/.well-known/jwks.json",
       agent_auth: %{
         skill: origin <> "/auth.md",
@@ -99,11 +92,8 @@ defmodule MarkdowWeb.DiscoveryController do
 
   def jwks(conn, _params) do
     case AgentAuth.jwks() do
-      {:ok, keys} ->
-        json(conn, keys)
-
-      {:error, _reason} ->
-        conn |> put_status(503) |> json(%{error: "signing_key_unavailable"})
+      {:ok, keys} -> json(conn, keys)
+      {:error, _reason} -> conn |> put_status(503) |> json(%{error: "signing_key_unavailable"})
     end
   end
 

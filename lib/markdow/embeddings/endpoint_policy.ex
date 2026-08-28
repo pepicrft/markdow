@@ -17,25 +17,47 @@ defmodule Markdow.Embeddings.EndpointPolicy do
   somewhere else afterwards.
   """
 
+  @type address :: :inet.ip_address()
+  @type target :: %{uri: URI.t(), addresses: [address()] | :operator_allowed}
   @type result :: {:ok, URI.t()} | {:error, atom()}
 
   @doc "Checks a configured endpoint, resolving its host to see where it leads."
-  @spec check(String.t() | nil) :: result()
-  def check(endpoint) when is_binary(endpoint) do
-    with {:ok, uri} <- parse(endpoint),
-         :ok <- check_scheme(uri),
-         :ok <- check_host(uri) do
+  @spec check(String.t() | nil, keyword()) :: result()
+  def check(endpoint, opts \\ [])
+
+  def check(endpoint, opts) when is_binary(endpoint) do
+    with {:ok, %{uri: uri}} <- resolve_endpoint(endpoint, opts) do
       {:ok, uri}
     end
   end
 
-  def check(_endpoint), do: {:error, :embedding_endpoint_invalid}
+  def check(_endpoint, _opts), do: {:error, :embedding_endpoint_invalid}
+
+  @doc """
+  Resolves an endpoint into the exact addresses a request may use.
+
+  The caller must connect to one of these returned addresses rather than
+  resolving the hostname again. That makes validation and connection one
+  operation, preventing a hostname from being changed to a private address in
+  the interval between the two.
+  """
+  @spec resolve_endpoint(String.t() | nil, keyword()) :: {:ok, target()} | {:error, atom()}
+  def resolve_endpoint(endpoint, opts \\ [])
+
+  def resolve_endpoint(endpoint, opts) when is_binary(endpoint) do
+    with {:ok, uri} <- parse(endpoint),
+         :ok <- check_scheme(uri, opts) do
+      resolve_host(uri, opts)
+    end
+  end
+
+  def resolve_endpoint(_endpoint, _opts), do: {:error, :embedding_endpoint_invalid}
 
   @doc "The hosts an operator has exempted from the address rules."
-  @spec allowed_hosts() :: [String.t()]
-  def allowed_hosts do
-    :markdow
-    |> Application.get_env(:embeddings_allowed_hosts, [])
+  @spec allowed_hosts(keyword()) :: [String.t()]
+  def allowed_hosts(opts \\ []) do
+    opts
+    |> Keyword.get(:allowed_hosts, Application.get_env(:markdow, :embeddings_allowed_hosts, []))
     |> List.wrap()
     |> Enum.map(&String.downcase/1)
   end
@@ -53,38 +75,51 @@ defmodule Markdow.Embeddings.EndpointPolicy do
 
   # Plain text would put the credential on the wire in readable form. An
   # operator naming a host takes responsibility for how it is reached.
-  defp check_scheme(%URI{scheme: "https"}), do: :ok
+  defp check_scheme(%URI{scheme: "https"}, _opts), do: :ok
 
-  defp check_scheme(%URI{scheme: "http"} = uri) do
-    if allowed_host?(uri), do: :ok, else: {:error, :embedding_endpoint_insecure}
+  defp check_scheme(%URI{scheme: "http"} = uri, opts) do
+    if allowed_host?(uri, opts), do: :ok, else: {:error, :embedding_endpoint_insecure}
   end
 
-  defp check_scheme(_uri), do: {:error, :embedding_endpoint_invalid}
+  defp check_scheme(_uri, _opts), do: {:error, :embedding_endpoint_invalid}
 
-  defp check_host(%URI{} = uri) do
-    if allowed_host?(uri) do
-      :ok
+  defp resolve_host(%URI{} = uri, opts) do
+    if allowed_host?(uri, opts) do
+      {:ok, %{uri: uri, addresses: :operator_allowed}}
     else
-      case resolve(uri.host) do
-        {:ok, addresses} ->
-          if Enum.all?(addresses, &public_address?/1),
-            do: :ok,
-            else: {:error, :embedding_endpoint_forbidden}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
+      resolve_public_host(uri, opts)
     end
   end
 
-  defp allowed_host?(%URI{host: host}) when is_binary(host),
-    do: String.downcase(host) in allowed_hosts()
+  defp resolve_public_host(uri, opts) do
+    with {:ok, addresses} <- resolve(uri.host, opts) do
+      target_for_public_addresses(uri, addresses)
+    end
+  end
 
-  defp allowed_host?(_uri), do: false
+  defp target_for_public_addresses(uri, addresses) do
+    if Enum.all?(addresses, &public_address?/1),
+      do: {:ok, %{uri: uri, addresses: addresses}},
+      else: {:error, :embedding_endpoint_forbidden}
+  end
+
+  defp allowed_host?(%URI{host: host}, opts) when is_binary(host),
+    do: String.downcase(host) in allowed_hosts(opts)
+
+  defp allowed_host?(_uri, _opts), do: false
 
   # Every address the name resolves to has to be acceptable. A name answering
   # with one public and one private address would otherwise be a way through.
-  defp resolve(host) do
+  defp resolve(host, opts) do
+    resolver = Keyword.get(opts, :resolver, &system_resolve/1)
+
+    case resolver.(host) do
+      {:ok, addresses} when is_list(addresses) and addresses != [] -> {:ok, Enum.uniq(addresses)}
+      _result -> {:error, :embedding_endpoint_unresolvable}
+    end
+  end
+
+  defp system_resolve(host) do
     charlist = String.to_charlist(host)
 
     results =
@@ -95,10 +130,7 @@ defmodule Markdow.Embeddings.EndpointPolicy do
         {:error, _reason} -> []
       end)
 
-    case results do
-      [] -> {:error, :embedding_endpoint_unresolvable}
-      addresses -> {:ok, addresses}
-    end
+    {:ok, results}
   end
 
   # Loopback, private, link-local, carrier-grade NAT, and the metadata address

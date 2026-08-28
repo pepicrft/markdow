@@ -11,6 +11,7 @@ defmodule Markdow.Index do
   alias Ecto.Adapters.SQL
   alias Markdow.Accounts
   alias Markdow.AgentAuth.AccessToken
+  alias Markdow.AgentAuth.Assertion
   alias Markdow.AgentAuth.Event
   alias Markdow.AgentAuth.Registration
   alias Markdow.Index.Context
@@ -442,31 +443,45 @@ defmodule Markdow.Index do
 
   defp persist_note(index, vault_id, id, body, opts) do
     with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo) do
-      storage_id = Accounts.storage_key(vault, id)
-      parsed = Markdown.parse(id, body, opts)
-      previous = Storage.read_note(index.storage, storage_id)
-
-      case Storage.write_note(index.storage, storage_id, body) do
-        :ok -> persist_note_index(index, vault_id, id, body, parsed, storage_id, previous)
-        {:error, reason} -> {:error, reason}
-      end
+      persist_vault_note(index, vault, vault_id, id, body, opts)
     end
   end
 
-  defp persist_note_index(index, vault_id, id, body, parsed, storage_id, previous) do
-    result =
-      transaction(index.repo, fn ->
-        with :ok <- acquire_write_lock(index.repo),
-             :ok <- upsert_note(index.repo, vault_id, id, body, parsed),
+  defp persist_vault_note(index, vault, vault_id, id, body, opts) do
+    storage_id = Accounts.storage_key(vault, id)
+    parsed = Markdown.parse(id, body, opts)
+
+    transaction(index.repo, fn ->
+      persist_note_transaction(index, vault_id, id, body, parsed, storage_id)
+    end)
+  end
+
+  defp persist_note_transaction(index, vault_id, id, body, parsed, storage_id) do
+    with :ok <- acquire_write_lock(index.repo) do
+      previous = Storage.read_note(index.storage, storage_id)
+
+      persist_note_locked(index, vault_id, id, body, parsed, storage_id, previous)
+    end
+  end
+
+  # Storage changes and their index transaction share the same advisory lock.
+  # The file must be written before it can be read back into the response, but
+  # restoring a rejected write before releasing the lock prevents another
+  # replica from committing a newer index row against the restored old file.
+  defp persist_note_locked(index, vault_id, id, body, parsed, storage_id, previous) do
+    case Storage.write_note(index.storage, storage_id, body) do
+      :ok ->
+        with :ok <- upsert_note(index.repo, vault_id, id, body, parsed),
              :ok <- replace_tags(index.repo, vault_id, id, parsed.tags),
              :ok <- refresh_links(index.repo, vault_id) do
           fetch_note(index, vault_id, id)
+        else
+          {:error, reason} ->
+            restore_persisted_note(index.storage, storage_id, previous, reason)
         end
-      end)
 
-    case result do
-      {:ok, note} -> {:ok, note}
-      {:error, reason} -> restore_persisted_note(index.storage, storage_id, previous, reason)
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -508,56 +523,56 @@ defmodule Markdow.Index do
   end
 
   defp remove_note(index, vault_id, id) do
-    case fetch_note(index, vault_id, id) do
-      {:ok, %{body: body}} -> remove_stored_note(index, vault_id, id, body)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp remove_stored_note(index, vault_id, id, body) do
     with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo) do
-      storage_id = Accounts.storage_key(vault, id)
-
-      case Storage.delete_note(index.storage, storage_id) do
-        :ok -> remove_indexed_note(index, vault_id, id, storage_id, body)
-        {:error, reason} -> {:error, reason}
-      end
+      remove_vault_note(index, vault, vault_id, id)
     end
   end
 
-  defp remove_indexed_note(index, vault_id, id, storage_id, body) do
-    result =
-      transaction(index.repo, fn ->
-        with :ok <- acquire_write_lock(index.repo) do
-          index.repo.delete_all(
-            from(note in Note, where: note.vault_id == ^vault_id and note.id == ^id)
-          )
+  defp remove_vault_note(index, vault, vault_id, id) do
+    storage_id = Accounts.storage_key(vault, id)
+    transaction(index.repo, fn -> remove_note_transaction(index, vault_id, id, storage_id) end)
+  end
 
-          :ok
-        end
-      end)
+  defp remove_note_transaction(index, vault_id, id, storage_id) do
+    with :ok <- acquire_write_lock(index.repo),
+         {:ok, _note} <- fetch_note(index, vault_id, id) do
+      remove_note_locked(index, vault_id, id, storage_id)
+    end
+  end
 
-    case result do
-      :ok -> :ok
-      {:error, reason} -> restore_removed_note(index.storage, storage_id, body, reason)
+  defp remove_note_locked(index, vault_id, id, storage_id) do
+    case Storage.delete_note(index.storage, storage_id) do
+      :ok ->
+        index.repo.delete_all(
+          from(note in Note, where: note.vault_id == ^vault_id and note.id == ^id)
+        )
+
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   defp rebuild(index, vault_id) do
-    with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo),
-         {:ok, storage_ids} <- Storage.list_notes(index.storage) do
-      ids = vault_note_ids(vault, storage_ids)
-      transaction(index.repo, fn -> rebuild_index(index, vault_id, vault, ids) end)
+    with {:ok, vault} <- Accounts.get_vault(vault_id, index.repo) do
+      transaction(index.repo, fn -> rebuild_transaction(index, vault_id, vault) end)
     end
   end
 
-  defp rebuild_index(index, vault_id, vault, ids) do
-    with :ok <- acquire_write_lock(index.repo) do
-      index.repo.delete_all(from(note in Note, where: note.vault_id == ^vault_id))
+  defp rebuild_transaction(index, vault_id, vault) do
+    with :ok <- acquire_write_lock(index.repo),
+         {:ok, storage_ids} <- Storage.list_notes(index.storage) do
+      ids = vault_note_ids(vault, storage_ids)
+      rebuild_index_locked(index, vault_id, vault, ids)
+    end
+  end
 
-      with :ok <- index_storage_notes(index, vault_id, vault, ids) do
-        refresh_links(index.repo, vault_id)
-      end
+  defp rebuild_index_locked(index, vault_id, vault, ids) do
+    index.repo.delete_all(from(note in Note, where: note.vault_id == ^vault_id))
+
+    with :ok <- index_storage_notes(index, vault_id, vault, ids) do
+      refresh_links(index.repo, vault_id)
     end
   end
 
@@ -808,11 +823,6 @@ defmodule Markdow.Index do
   defp restore_storage(storage, id, {:error, :enoent}), do: Storage.delete_note(storage, id)
   defp restore_storage(_storage, _id, _previous), do: :ok
 
-  defp restore_removed_note(storage, id, body, reason) do
-    Storage.write_note(storage, id, body)
-    {:error, reason}
-  end
-
   defp perform_agent_auth(index, {:registration_count_since, since, address}) do
     query = from(registration in Registration, where: registration.created_at >= ^since)
 
@@ -904,8 +914,7 @@ defmodule Markdow.Index do
 
   defp perform_agent_auth(
          index,
-         {:confirm_claim, id, code_hash, user_id, claimed_at, email_verified, address,
-          attempt_limit}
+         {:confirm_claim, id, user_id, claimed_at, email_verified, address, attempt_limit}
        ) do
     index.repo.transaction(fn ->
       registration =
@@ -916,7 +925,6 @@ defmodule Markdow.Index do
       case confirm_locked_claim(
              index.repo,
              registration,
-             code_hash,
              user_id,
              claimed_at,
              email_verified,
@@ -978,6 +986,25 @@ defmodule Markdow.Index do
         insert_agent_event(index.repo, token.registration_id, "token.issued", %{
           scope: token.scopes
         })
+      end
+    end)
+  end
+
+  defp perform_agent_auth(index, {:consume_assertion, hash, expires_at, current_time}) do
+    transaction(index.repo, fn ->
+      index.repo.delete_all(
+        from(assertion in Assertion, where: assertion.expires_at <= ^current_time)
+      )
+
+      timestamp = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      case index.repo.insert_all(
+             Assertion,
+             [%{jti_hash: hash, expires_at: expires_at, inserted_at: timestamp}],
+             on_conflict: :nothing
+           ) do
+        {1, _records} -> :ok
+        {0, _records} -> {:error, :assertion_replayed}
       end
     end)
   end
@@ -1050,7 +1077,6 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          _repo,
          nil,
-         _code_hash,
          _user_id,
          _at,
          _email_verified,
@@ -1062,31 +1088,25 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          repo,
          %{status: "pending"} = registration,
-         code_hash,
          user_id,
          claimed_at,
          email_verified,
          address,
-         attempt_limit
+         _attempt_limit
        ) do
-    if secure_digest_match?(registration.user_code_hash, code_hash) do
-      claim_locked_registration(
-        repo,
-        registration,
-        user_id,
-        claimed_at,
-        email_verified,
-        address
-      )
-    else
-      reject_claim_code(repo, registration, address, attempt_limit)
-    end
+    claim_locked_registration(
+      repo,
+      registration,
+      user_id,
+      claimed_at,
+      email_verified,
+      address
+    )
   end
 
   defp confirm_locked_claim(
          _repo,
          %{status: "claimed"},
-         _code_hash,
          _user_id,
          _claimed_at,
          _email_verified,
@@ -1098,7 +1118,6 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          _repo,
          _registration,
-         _code_hash,
          _user_id,
          _claimed_at,
          _email_verified,
@@ -1225,37 +1244,6 @@ defmodule Markdow.Index do
   defp finish_claim({:error, reason}, _repo, _registration_id, _user_id, _address),
     do: {:error, reason}
 
-  defp reject_claim_code(repo, registration, address, attempt_limit) do
-    failed_attempts = registration.failed_claim_attempts + 1
-    expired? = failed_attempts >= attempt_limit
-
-    updates =
-      if expired?,
-        do: %{failed_claim_attempts: failed_attempts, status: "expired"},
-        else: %{failed_claim_attempts: failed_attempts}
-
-    registration
-    |> Ecto.Changeset.change(updates)
-    |> repo.update()
-    |> finish_claim_rejection(repo, registration.id, address, expired?)
-  end
-
-  defp finish_claim_rejection({:error, reason}, _repo, _id, _address, _expired?),
-    do: {:error, reason}
-
-  defp finish_claim_rejection({:ok, _registration}, _repo, _id, _address, false),
-    do: {:error, :invalid_user_code}
-
-  defp finish_claim_rejection({:ok, _registration}, repo, id, address, true) do
-    case insert_agent_event(repo, id, "registration.expired", %{
-           reason: "claim_attempt_limit",
-           network_address: address
-         }) do
-      :ok -> {:error, :expired_token}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
   defp finish_sign_in_failure({:error, reason}, _repo, _id, _address, _expired?),
     do: {:error, reason}
 
@@ -1293,10 +1281,6 @@ defmodule Markdow.Index do
           insert_agent_event(repo, token.registration_id, "token.revoked", %{})
         end
     end
-  end
-
-  defp secure_digest_match?(expected, actual) do
-    byte_size(expected) == byte_size(actual) and Plug.Crypto.secure_compare(expected, actual)
   end
 
   defp find_registration(repo, attribute, value) do
@@ -1388,8 +1372,7 @@ defmodule Markdow.Index do
          :ok <-
            insert_agent_event(repo, registration.id, "claim.requested", %{
              email: registration.claim_email
-           }),
-         :ok <- insert_agent_event(repo, registration.id, "user_code.minted", %{}) do
+           }) do
       {:ok, registration}
     end
   end

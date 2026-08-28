@@ -127,7 +127,7 @@ agent_auth_private_key =
 embedding_secret_key =
   case {config_env(), System.get_env("MARKDOW_EMBEDDING_SECRET_KEY")} do
     {:prod, nil} ->
-      nil
+      raise "environment variable MARKDOW_EMBEDDING_SECRET_KEY is missing"
 
     {_environment, nil} ->
       "0123456789abcdef0123456789abcdef"
@@ -208,12 +208,24 @@ if config_env() == :prod do
       System.get_env("MARKDOW_SECRET_KEY_BASE") ||
         raise("environment variable MARKDOW_SECRET_KEY_BASE is missing")
 
+  smtp_relay = System.get_env("MARKDOW_SMTP_RELAY", "smtp-relay.smtp-relay.svc.cluster.local")
+
   config :markdow, Markdow.Mailer,
     adapter: Swoosh.Adapters.SMTP,
-    relay: System.get_env("MARKDOW_SMTP_RELAY", "smtp-relay.pepicrft.me"),
+    relay: smtp_relay,
     port: String.to_integer(System.get_env("MARKDOW_SMTP_PORT", "587")),
     auth: :never,
-    tls: :never,
+    tls: :always,
+    tls_options: [
+      versions: [:"tlsv1.2", :"tlsv1.3"],
+      verify: :verify_peer,
+      cacerts: :public_key.cacerts_get(),
+      server_name_indication: String.to_charlist(smtp_relay),
+      depth: 99,
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ],
     retries: 2,
     no_mx_lookups: true
 end
@@ -290,7 +302,10 @@ config :markdow,
 # clients discovered the authorization server at or they will refuse them.
 config :boruta, Boruta.Oauth,
   repo: Markdow.Repo,
-  contexts: [resource_owners: Markdow.OAuth.ResourceOwners],
+  contexts: [
+    clients: Markdow.OAuth.Clients,
+    resource_owners: Markdow.OAuth.ResourceOwners
+  ],
   issuer: default_public_origin,
   max_ttl: [
     authorization_code: 60,

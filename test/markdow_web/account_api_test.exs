@@ -70,6 +70,13 @@ defmodule MarkdowWeb.AccountApiTest do
     assert revocation == %{"revoked" => 0, "user_id" => "grace"}
   end
 
+  test "does not cache protected responses", %{index: index} do
+    response = DataCase.endpoint_conn(:get, "/users", nil, index, "test")
+
+    assert Plug.Conn.get_resp_header(response, "cache-control") == ["no-store"]
+    assert Plug.Conn.get_resp_header(response, "pragma") == ["no-cache"]
+  end
+
   defp request(index, method, path, body) do
     DataCase.endpoint_conn(method, path, body, index, "test")
   end

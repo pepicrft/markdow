@@ -148,6 +148,7 @@ defmodule Markdow.Storage.LocalFs do
     relative_path = id <> ".md"
 
     with :ok <- validate_relative_path(id),
+         :ok <- reject_asset_namespace(id),
          :ok <- reject_symbolic_links(root, relative_path),
          do: {:ok, Path.join(root, relative_path)}
   end
@@ -171,6 +172,13 @@ defmodule Markdow.Storage.LocalFs do
          Enum.all?(segments, &(&1 not in [".", "..", ""])),
        do: :ok,
        else: {:error, :invalid_path}
+  end
+
+  defp reject_asset_namespace(path) do
+    case Path.split(path) do
+      ["assets" | _rest] -> {:error, :invalid_path}
+      _segments -> :ok
+    end
   end
 
   # Existing symbolic links are never followed. A vault can contain links created

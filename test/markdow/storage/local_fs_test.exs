@@ -60,6 +60,8 @@ defmodule Markdow.Storage.LocalFsTest do
   test "rejects traversal and absolute paths", %{storage: storage} do
     assert LocalFs.write_note(storage, "../outside", "no") == {:error, :invalid_path}
     assert LocalFs.read_note(storage, "/tmp/outside") == {:error, :invalid_path}
+    assert LocalFs.write_note(storage, "assets/hidden", "no") == {:error, :invalid_path}
+    assert LocalFs.read_note(storage, "assets/hidden") == {:error, :invalid_path}
 
     assert LocalFs.write_asset(storage, "images/../../outside", "no") ==
              {:error, :invalid_path}
