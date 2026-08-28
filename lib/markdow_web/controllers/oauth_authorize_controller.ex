@@ -171,7 +171,11 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
           dt { font: var(--weight-semibold) var(--text-label)/var(--leading-snug) var(--sans); }
           dd { margin: var(--space-1) 0 var(--space-5); }
           dd:last-child { margin-bottom: 0; }
-          button { border: var(--rule-width) solid var(--accent); padding: var(--space-4) var(--space-6); background: var(--accent); color: var(--ink-inverted); font: var(--weight-semibold) var(--text-label)/var(--leading-flat) var(--sans); cursor: pointer; }
+          [data-part="authorization-actions"] { display: grid; justify-items: start; gap: var(--space-3); }
+          [data-part="authorization-actions"] form { margin: 0; }
+          button { width: fit-content; border: var(--rule-width) solid var(--accent); padding: var(--space-4) var(--space-6); background: var(--accent); color: var(--ink-inverted); font: var(--weight-semibold) var(--text-label)/var(--leading-flat) var(--sans); cursor: pointer; }
+          button:focus-visible { outline: var(--accent-width) solid var(--ink); outline-offset: var(--space-1); }
+          [data-part="deny"] button { border-color: var(--rule); background: transparent; color: var(--ink); }
         </style>
       </head>
       <body>
@@ -184,17 +188,19 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
             <dt>Requested access</dt>
             <dd>#{scopes}</dd>
           </dl>
-          <form method="post" action="/oauth2/authorize">
-            #{csrf_field()}
-            #{fields}
-            <input type="hidden" name="consent" value="approve">
-            <button type="submit">Allow access</button>
-          </form>
-          <form method="post" action="/oauth2/authorize/deny">
-            #{csrf_field()}
-            #{fields}
-            <button type="submit">Do not allow access</button>
-          </form>
+          <div data-part="authorization-actions">
+            <form method="post" action="/oauth2/authorize">
+              #{csrf_field()}
+              #{fields}
+              <input type="hidden" name="consent" value="approve">
+              <button type="submit">Allow access</button>
+            </form>
+            <form method="post" action="/oauth2/authorize/deny" data-part="deny">
+              #{csrf_field()}
+              #{fields}
+              <button type="submit">Do not allow access</button>
+            </form>
+          </div>
         </main>
       </body>
     </html>
