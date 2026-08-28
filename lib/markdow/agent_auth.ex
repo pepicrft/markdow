@@ -113,8 +113,11 @@ defmodule Markdow.AgentAuth do
          :ok <-
            Index.agent_auth(
              index(opts),
-             {:confirm_claim, registration.id, user_code_digest(user_code, registration.id, opts),
-              user_id, current_time, true, option(opts, :network_address, nil),
+             {:confirm_claim, registration.id,
+              [
+                user_code_digest(user_code, registration.id, opts),
+                legacy_user_code_digest(user_code, opts)
+              ], user_id, current_time, true, option(opts, :network_address, nil),
               option(opts, :claim_attempt_limit, 5)}
            ) do
       {:ok,
@@ -544,6 +547,27 @@ defmodule Markdow.AgentAuth do
   defp digest(value), do: :crypto.hash(:sha256, value)
 
   defp user_code_digest(code, registration_id, opts) do
+    :crypto.mac(
+      :hmac,
+      :sha256,
+      user_code_key(opts),
+      "markdow:agent-user-code:v2:" <> registration_id <> ":" <> normalize_user_code(code)
+    )
+  end
+
+  # Registrations remain claimable for ten minutes. During a rolling deploy, a
+  # server can therefore see a record created with the earlier format. Accept
+  # that format only while confirming an already-issued claim attempt.
+  defp legacy_user_code_digest(code, opts) do
+    :crypto.mac(
+      :hmac,
+      :sha256,
+      user_code_key(opts),
+      "markdow:agent-user-code:v1:" <> normalize_user_code(code)
+    )
+  end
+
+  defp user_code_key(opts) do
     key =
       option(
         opts,
@@ -551,12 +575,7 @@ defmodule Markdow.AgentAuth do
         Keyword.get(opts, :api_key) || Application.fetch_env!(:markdow, :api_key)
       )
 
-    :crypto.mac(
-      :hmac,
-      :sha256,
-      key,
-      "markdow:agent-user-code:v2:" <> registration_id <> ":" <> normalize_user_code(code)
-    )
+    key
   end
 
   defp secret(prefix),

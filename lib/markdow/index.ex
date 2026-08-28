@@ -914,7 +914,7 @@ defmodule Markdow.Index do
 
   defp perform_agent_auth(
          index,
-         {:confirm_claim, id, code_hash, user_id, claimed_at, email_verified, address,
+         {:confirm_claim, id, code_hashes, user_id, claimed_at, email_verified, address,
           attempt_limit}
        ) do
     index.repo.transaction(fn ->
@@ -926,7 +926,7 @@ defmodule Markdow.Index do
       case confirm_locked_claim(
              index.repo,
              registration,
-             code_hash,
+             code_hashes,
              user_id,
              claimed_at,
              email_verified,
@@ -1091,14 +1091,14 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          repo,
          %{status: "pending"} = registration,
-         code_hash,
+         code_hashes,
          user_id,
          claimed_at,
          email_verified,
          address,
          attempt_limit
        ) do
-    if secure_digest_match?(registration.user_code_hash, code_hash) do
+    if valid_claim_code?(registration.user_code_hash, code_hashes) do
       claim_locked_registration(
         repo,
         registration,
@@ -1135,6 +1135,15 @@ defmodule Markdow.Index do
          _attempt_limit
        ),
        do: {:error, :expired_token}
+
+  defp valid_claim_code?(stored_hash, code_hashes) when is_list(code_hashes) do
+    Enum.reduce(code_hashes, false, fn code_hash, valid? ->
+      secure_digest_match?(stored_hash, code_hash) or valid?
+    end)
+  end
+
+  defp valid_claim_code?(stored_hash, code_hash),
+    do: secure_digest_match?(stored_hash, code_hash)
 
   defp record_locked_sign_in_failure(_repo, nil, _address, _limit),
     do: {:error, :invalid_claim_token}

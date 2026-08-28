@@ -148,6 +148,33 @@ defmodule Markdow.AgentAuthTest do
              )
   end
 
+  test "accepts a pending claim minted before codes were registration-scoped", %{index: index} do
+    opts = auth_opts(index)
+    user = create_user(index, @email)
+    assert {:ok, registration} = AgentAuth.create_service_registration(@email, opts)
+
+    legacy_hash =
+      :crypto.mac(
+        :hmac,
+        :sha256,
+        opts[:user_code_hmac_key],
+        "markdow:agent-user-code:v1:" <> registration.user_code
+      )
+
+    registration.registration.id
+    |> then(&Repo.get!(Markdow.AgentAuth.Registration, &1))
+    |> Ecto.Changeset.change(user_code_hash: legacy_hash)
+    |> Repo.update!()
+
+    assert {:ok, _claimed} =
+             AgentAuth.confirm_claim(
+               registration.claim_attempt_token,
+               registration.user_code,
+               user,
+               opts
+             )
+  end
+
   test "rejects an authenticated account whose email differs from the login hint", %{index: index} do
     opts = auth_opts(index)
     attacker = create_user(index, "attacker@example.com")
