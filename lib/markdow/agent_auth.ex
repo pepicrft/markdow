@@ -4,8 +4,6 @@ defmodule Markdow.AgentAuth do
 
   High-entropy registration secrets and access tokens are stored as
   [Secure Hash Algorithm 2](https://csrc.nist.gov/pubs/fips/180-4/upd1/final) 256-bit digests.
-  Six-digit user codes use a keyed hash so a database reader cannot enumerate
-  their small value space offline.
   A claim can be completed only by an authenticated Markdow user whose email
   matches the registration login hint.
   """
@@ -92,17 +90,16 @@ defmodule Markdow.AgentAuth do
     end
   end
 
-  @spec confirm_claim(String.t(), String.t(), map(), keyword()) ::
+  @spec confirm_claim(String.t(), map(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def confirm_claim(claim_attempt_token, user_code, user, opts \\ [])
+  def confirm_claim(claim_attempt_token, user, opts \\ [])
 
   def confirm_claim(
         claim_attempt_token,
-        user_code,
         %{id: user_id, email: email, email_verified_at: email_verified_at},
         opts
       )
-      when is_binary(claim_attempt_token) and is_binary(user_code) and is_binary(user_id) and
+      when is_binary(claim_attempt_token) and is_binary(user_id) and
              is_binary(email) do
     current_time = now(opts)
 
@@ -113,12 +110,8 @@ defmodule Markdow.AgentAuth do
          :ok <-
            Index.agent_auth(
              index(opts),
-             {:confirm_claim, registration.id,
-              [
-                user_code_digest(user_code, registration.id, opts),
-                legacy_user_code_digest(user_code, opts)
-              ], user_id, current_time, true, option(opts, :network_address, nil),
-              option(opts, :claim_attempt_limit, 5)}
+             {:confirm_claim, registration.id, user_id, current_time, true,
+              option(opts, :network_address, nil), option(opts, :claim_attempt_limit, 5)}
            ) do
       {:ok,
        Map.merge(registration, %{
@@ -129,7 +122,7 @@ defmodule Markdow.AgentAuth do
     end
   end
 
-  def confirm_claim(_claim_attempt_token, _user_code, _user, _opts),
+  def confirm_claim(_claim_attempt_token, _user, _opts),
     do: {:error, :invalid_request}
 
   @spec exchange_claim(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -224,7 +217,6 @@ defmodule Markdow.AgentAuth do
     registration_id = secret("reg_")
     claim_token = secret("clm_")
     claim_attempt_token = secret("cla_")
-    user_code = user_code()
 
     registration = %{
       id: registration_id,
@@ -233,7 +225,6 @@ defmodule Markdow.AgentAuth do
       claim_email: email,
       claim_token_hash: digest(claim_token),
       claim_attempt_token_hash: digest(claim_attempt_token),
-      user_code_hash: user_code_digest(user_code, registration_id, opts),
       created_at: current_time,
       expires_at: current_time + option(opts, :registration_ttl_seconds, 86_400),
       claim_attempt_expires_at: current_time + option(opts, :claim_attempt_ttl_seconds, 600),
@@ -250,8 +241,7 @@ defmodule Markdow.AgentAuth do
        %{
          registration: registration,
          claim_token: claim_token,
-         claim_attempt_token: claim_attempt_token,
-         user_code: user_code
+         claim_attempt_token: claim_attempt_token
        }}
     end
   end
@@ -526,8 +516,6 @@ defmodule Markdow.AgentAuth do
       Plug.Crypto.secure_compare(api_key, expected)
   end
 
-  defp normalize_user_code(code), do: String.trim(code)
-
   defp validate_resource(resource, _opts) when resource in [nil, ""], do: :ok
 
   defp validate_resource(resource, opts) do
@@ -546,47 +534,6 @@ defmodule Markdow.AgentAuth do
   defp option(opts, key, default), do: Keyword.get(opts, key, Keyword.get(config(), key, default))
   defp digest(value), do: :crypto.hash(:sha256, value)
 
-  defp user_code_digest(code, registration_id, opts) do
-    :crypto.mac(
-      :hmac,
-      :sha256,
-      user_code_key(opts),
-      "markdow:agent-user-code:v2:" <> registration_id <> ":" <> normalize_user_code(code)
-    )
-  end
-
-  # Registrations remain claimable for ten minutes. During a rolling deploy, a
-  # server can therefore see a record created with the earlier format. Accept
-  # that format only while confirming an already-issued claim attempt.
-  defp legacy_user_code_digest(code, opts) do
-    :crypto.mac(
-      :hmac,
-      :sha256,
-      user_code_key(opts),
-      "markdow:agent-user-code:v1:" <> normalize_user_code(code)
-    )
-  end
-
-  defp user_code_key(opts) do
-    key =
-      option(
-        opts,
-        :user_code_hmac_key,
-        Keyword.get(opts, :api_key) || Application.fetch_env!(:markdow, :api_key)
-      )
-
-    key
-  end
-
   defp secret(prefix),
     do: prefix <> (:crypto.strong_rand_bytes(24) |> Base.url_encode64(padding: false))
-
-  defp user_code do
-    4
-    |> :crypto.strong_rand_bytes()
-    |> :binary.decode_unsigned()
-    |> rem(1_000_000)
-    |> Integer.to_string()
-    |> String.pad_leading(6, "0")
-  end
 end

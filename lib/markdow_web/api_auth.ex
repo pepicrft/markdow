@@ -25,11 +25,9 @@ defmodule MarkdowWeb.ApiAuth do
     end
   end
 
-  # Two kinds of credential reach the same operations. A claim ceremony token is
-  # tried first because it is the one Markdow issues most and the one bound to a
-  # resource, and a registered client's token is tried second. Both resolve to
-  # the same authorization shape, so nothing downstream branches on which was
-  # presented.
+  # Email-confirmed agent access and user-authorized OAuth access both resolve
+  # to the same account-bound authorization shape. Nothing downstream branches
+  # on which credential format was presented.
   #
   # `:insufficient_scope` from the first path is returned rather than retried:
   # the token was recognised and simply did not carry the scope, and turning

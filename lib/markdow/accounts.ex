@@ -48,6 +48,33 @@ defmodule Markdow.Accounts do
     |> map_record(&user_map/1)
   end
 
+  @doc "Finds an account by email or creates its passwordless shell."
+  @spec find_or_create_by_email(String.t(), module()) :: {:ok, map()} | {:error, term()}
+  def find_or_create_by_email(email, repo \\ Repo)
+
+  def find_or_create_by_email(email, repo) when is_binary(email) do
+    normalized_email = normalize_email(email)
+
+    case repo.get_by(User, email: normalized_email) do
+      %User{} = user ->
+        {:ok, user_map(user)}
+
+      nil ->
+        case create_user(%{"email" => normalized_email}, repo) do
+          {:ok, user} ->
+            {:ok, user}
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            find_existing_after_conflict(changeset, normalized_email, repo)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  def find_or_create_by_email(_email, _repo), do: {:error, :invalid_email}
+
   @spec claim_user(String.t(), String.t(), String.t(), module()) ::
           {:ok, map()} | {:error, term()}
   def claim_user(email, name, password, repo \\ Repo)
@@ -115,6 +142,35 @@ defmodule Markdow.Accounts do
     end
   end
 
+  @doc "Delivers a one-time login link to an account's verified email address."
+  @spec deliver_login_link(map(), (String.t() -> String.t()), module(), module()) ::
+          {:ok, term()} | {:error, term()}
+  def deliver_login_link(%{id: user_id}, build_url, notifier, repo \\ Repo)
+      when is_binary(user_id) and is_function(build_url, 1) and is_atom(notifier) do
+    with %User{} = user <- repo.get(User, user_id),
+         {encoded_token, token_record} <- EmailVerificationToken.build(user, "login"),
+         {_, nil} <-
+           repo.delete_all(
+             from(token in EmailVerificationToken,
+               where: token.user_id == ^user_id and token.context == "login"
+             )
+           ),
+         {:ok, _token} <- repo.insert(token_record),
+         {:ok, email} <- notifier.deliver_login_link(user, build_url.(encoded_token)) do
+      {:ok, email}
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "Consumes a one-time email link, verifies the address, and returns its account."
+  @spec login_user_by_email_link(String.t(), module()) :: {:ok, map()} | {:error, :invalid_token}
+  def login_user_by_email_link(token, repo \\ Repo) do
+    repo.transaction(fn -> login_user_by_email_link_transaction(token, repo) end)
+    |> normalize_verification_transaction()
+  end
+
   @spec get_user_by_email_verification_token(String.t(), module()) ::
           {:ok, map()} | {:error, :invalid_token}
   def get_user_by_email_verification_token(token, repo \\ Repo) do
@@ -173,6 +229,17 @@ defmodule Markdow.Accounts do
 
   defp map_record({:ok, record}, mapper), do: {:ok, mapper.(record)}
   defp map_record({:error, reason}, _mapper), do: {:error, reason}
+
+  defp find_existing_after_conflict(changeset, email, repo) do
+    if Keyword.has_key?(changeset.errors, :email) do
+      case repo.get_by(User, email: email) do
+        %User{} = user -> {:ok, user_map(user)}
+        nil -> {:error, changeset}
+      end
+    else
+      {:error, changeset}
+    end
+  end
 
   defp locked_user(email, repo) do
     repo.one(from(user in User, where: user.email == ^email, lock: "FOR UPDATE"))
@@ -244,6 +311,34 @@ defmodule Markdow.Accounts do
     else
       _invalid -> repo.rollback(:invalid_token)
     end
+  end
+
+  defp login_user_by_email_link_transaction(token, repo) do
+    with {:ok, query} <- EmailVerificationToken.login_query(token),
+         {%User{} = user, %EmailVerificationToken{}} <-
+           repo.one(from(record in query, lock: "FOR UPDATE")),
+         {:ok, user} <- verify_email_if_needed(user, repo) do
+      repo.delete_all(
+        from(record in EmailVerificationToken,
+          where: record.user_id == ^user.id and record.context == "login"
+        )
+      )
+
+      user_map(user)
+    else
+      _invalid -> repo.rollback(:invalid_token)
+    end
+  end
+
+  defp verify_email_if_needed(%User{email_verified_at: %DateTime{}} = user, _repo),
+    do: {:ok, user}
+
+  defp verify_email_if_needed(user, repo) do
+    user
+    |> Ecto.Changeset.change(
+      email_verified_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    )
+    |> repo.update()
   end
 
   defp normalize_verification_transaction({:ok, user}), do: {:ok, user}

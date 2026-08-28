@@ -64,7 +64,6 @@ defmodule MarkdowWeb.AgentIdentityController do
       claim_token_expires: iso8601(registration.expires_at),
       post_claim_scopes: AgentAuth.agent_scopes(),
       claim: %{
-        user_code: result.user_code,
         expires_in: expires_in,
         verification_uri:
           origin <>

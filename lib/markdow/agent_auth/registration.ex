@@ -11,7 +11,6 @@ defmodule Markdow.AgentAuth.Registration do
     field(:claim_email, :string)
     field(:claim_token_hash, :binary)
     field(:claim_attempt_token_hash, :binary)
-    field(:user_code_hash, :binary)
     field(:created_at, :integer)
     field(:expires_at, :integer)
     field(:claim_attempt_expires_at, :integer)

@@ -73,24 +73,25 @@ config :browse_chrome,
 
 config :phoenix,
        :filter_parameters,
-       ~w(password token access_token client_secret email_verification_token claim_token claim_attempt_token user_code assertion data_base64)
+       ~w(password token access_token refresh_token client_secret code code_verifier email_verification_token claim_token claim_attempt_token assertion data_base64)
 
 config :markdow, Markdow.Mailer, adapter: Swoosh.Adapters.Local
 config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
-# Boruta backs the RFC 7591 registration endpoint and the client credentials
-# grant. It owns the oauth_clients, oauth_scopes and oauth_tokens tables and
-# nothing else: the claim ceremony in Markdow.AgentAuth keeps issuing its own
-# tokens, and both kinds are accepted by MarkdowWeb.ApiAuth.
+# Boruta backs public client registration and the authorization-code flow. Its
+# access-token subject is the individual Markdow account that signed in and
+# confirmed the request.
 config :boruta, Boruta.Oauth,
   repo: Markdow.Repo,
-  contexts: [resource_owners: Markdow.OAuth.ResourceOwners],
+  contexts: [
+    clients: Markdow.OAuth.Clients,
+    resource_owners: Markdow.OAuth.ResourceOwners
+  ],
   issuer: "https://markdow.example.com",
   max_ttl: [
     authorization_code: 60,
-    # A registered client renews on its own with its own secret, so the token
-    # stays short. This is what a machine peer holds instead of the one hour
-    # access token the claim ceremony issues and cannot refresh.
+    # Email-authenticated browser grants stay short. A public client renews with
+    # a rotating refresh token and never receives a deployment-wide secret.
     access_token: 3_600,
     id_token: 3_600,
     refresh_token: 60 * 60 * 24 * 30

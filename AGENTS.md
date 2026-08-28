@@ -1,5 +1,15 @@
 # Markdow development instructions
 
+## Tenancy and authentication
+
+- Markdow is a multi-tenant service. Authorization must always derive from the
+  individual authenticated user and the vault they own. Do not introduce a
+  deployment-wide master token, shared user credential, or global secret that
+  substitutes for user authorization.
+- Browser authentication uses one-time email links. Store only a hash of each
+  link token, expire and consume it after use, and bind any issued access token
+  to the authenticated user.
+
 ## Writing
 
 - Avoid acronyms. When one is necessary, include its full name and a link to a website that explains the concept.

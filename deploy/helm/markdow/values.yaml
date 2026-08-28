@@ -49,7 +49,7 @@ extraEnv:
   MARKDOW_MARKETING_ROUTES: "true"
   MARKDOW_OG_BROWSER_POOL_SIZE: "2"
   MARKDOW_SMTP_PORT: "587"
-  MARKDOW_SMTP_RELAY: smtp-relay.pepicrft.me
+  MARKDOW_SMTP_RELAY: smtp-relay.smtp-relay.svc.cluster.local
   MARKDOW_STORAGE_DRIVER: local
   MARKDOW_STORAGE_PATH: /app/data/vault
 

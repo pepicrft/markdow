@@ -1,21 +1,11 @@
 defmodule Markdow.OAuth do
   @moduledoc """
-  Dynamic client registration and the client credentials grant, backed by Boruta.
+  User-bound OAuth authorization-code access backed by Boruta.
 
-  This exists next to `Markdow.AgentAuth` rather than replacing it, because the
-  two answer different questions. The claim ceremony proves a person is present
-  and hands back a token that cannot be renewed, which is right for an agent
-  acting on someone's behalf for the length of a task. A machine peer that has
-  to keep working needs a credential it can present again tomorrow, and that is
-  what a registered client with a secret is.
-
-  A registered client is bound to exactly one Markdow account at registration
-  time, recorded in `Markdow.OAuth.ClientOwner`. That binding is the whole of
-  its authority: `Markdow.Operations.authorize_arguments/4` compares the account
-  on the token against the account owning the vault, so a client can only ever
-  reach the vaults of the account that registered it. A client with no binding
-  can still be issued a token and will be refused by every user and vault scoped
-  operation, which is the safe direction for the failure to point.
+  A client is public and can be used by more than one Markdow account. Its
+  access token instead carries the authenticated user's subject. Every vault
+  operation compares that subject with the vault owner, so a client never gains
+  cross-tenant authority merely by being registered.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -28,16 +18,13 @@ defmodule Markdow.OAuth do
   alias Markdow.OAuth.TokenResource
   alias Markdow.Repo
 
-  @client_credentials "client_credentials"
+  @interactive_grant_types ["authorization_code", "refresh_token"]
 
   @spec grant_types() :: [String.t()]
-  def grant_types, do: [@client_credentials]
+  def grant_types, do: @interactive_grant_types
 
   @doc """
-  Scopes a registered client may hold.
-
-  Deliberately the same list the claim ceremony grants, which excludes
-  `users:write`: registering a client must not become a way to create accounts.
+  Scopes a client may receive after a person signs in and consents.
   """
   @spec scopes() :: [String.t()]
   def scopes, do: AgentAuth.agent_scopes()
@@ -66,13 +53,10 @@ defmodule Markdow.OAuth do
   end
 
   @doc """
-  Restricts a freshly registered client and binds it to an account.
+  Restricts a legacy confidential client and binds it to an account.
 
-  Boruta's registration changeset accepts only the RFC 7591 attributes, so the
-  client arrives supporting `authorization_code` as well and belonging to
-  nobody. Markdow exposes no authorization endpoint, so that grant is
-  unreachable, but advertising a grant this server cannot honour would be a lie
-  told to every client that reads the registration response.
+  Interactive clients do not call this function. Their token subject, rather
+  than their client identifier, supplies the account authorization.
 
   The narrowing and the binding happen together. If either fails the client is
   deleted, because a client that exists without an owner is a credential nobody
@@ -122,11 +106,11 @@ defmodule Markdow.OAuth do
 
   def authorize(token, required_scopes, resource)
       when is_binary(token) and is_list(required_scopes) do
-    with {:ok, %{scope: scope, client: %{id: client_id}}} <-
+    with {:ok, %{scope: scope, client: %{id: client_id}} = boruta_token} <-
            token_for(token),
          :ok <- authorize_scopes(scope, required_scopes),
          :ok <- authorize_resource(token, resource),
-         {:ok, user_id} <- owner(client_id) do
+         {:ok, user_id} <- token_user(boruta_token, client_id) do
       {:ok,
        %{
          kind: :access_token,
@@ -275,6 +259,13 @@ defmodule Markdow.OAuth do
       _error -> {:error, :invalid_token}
     end
   end
+
+  defp token_user(%{sub: user_id}, _client_id) when is_binary(user_id) and byte_size(user_id) > 0,
+    do: {:ok, user_id}
+
+  # Existing confidential clients remain bound through their explicit owner
+  # row. New public clients have no single owner and must carry a user subject.
+  defp token_user(_token, client_id), do: owner(client_id)
 
   defp authorize_scopes(granted, required) do
     granted = granted |> to_string() |> String.split() |> MapSet.new()

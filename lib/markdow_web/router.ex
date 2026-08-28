@@ -31,6 +31,7 @@ defmodule MarkdowWeb.Router do
   pipeline :agent_claim do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug MarkdowWeb.UserAuth, :fetch_current_user
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug MarkdowWeb.RateLimit, bucket: :authentication, response: :text
@@ -133,16 +134,13 @@ defmodule MarkdowWeb.Router do
   scope "/", MarkdowWeb do
     pipe_through :agent_claim
 
+    get "/accounts/log-in", AccountSessionController, :new
+    post "/accounts/log-in", AccountSessionController, :create
+    get "/accounts/log-in/:token", AccountSessionController, :confirm
+    get "/oauth2/authorize", OAuthAuthorizeController, :authorize
+    post "/oauth2/authorize", OAuthAuthorizeController, :approve
     get "/agent/identity/claim", ClaimController, :show
-    post "/agent/identity/claim/sign-up", ClaimController, :sign_up
-    post "/agent/identity/claim/sign-in", ClaimController, :sign_in
-    get "/agent/identity/claim/verify-email", ClaimController, :show_email_verification
-    post "/agent/identity/claim/verify-email", ClaimController, :verify_email
-
-    post "/agent/identity/claim/resend-email-verification",
-         ClaimController,
-         :resend_email_verification
-
+    post "/agent/identity/claim/resend-email-link", ClaimController, :resend
     post "/agent/identity/claim/confirm", ClaimController, :confirm
     post "/agent/identity/claim/sign-out", ClaimController, :sign_out
   end

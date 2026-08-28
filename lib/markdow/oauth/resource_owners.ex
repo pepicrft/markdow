@@ -1,26 +1,36 @@
 defmodule Markdow.OAuth.ResourceOwners do
-  @moduledoc """
-  Boruta's resource owner context, deliberately empty.
-
-  Markdow exposes exactly one Boruta grant, `client_credentials`, which has no
-  resource owner by definition. The flows that would consult this module are the
-  password and authorization code grants, and a registered client does not
-  advertise them. Answering here would be the only way a client could act as a
-  person without that person ever signing in, so every callback refuses.
-
-  Human consent lives in the claim ceremony in `Markdow.AgentAuth` instead.
-  """
+  @moduledoc false
 
   @behaviour Boruta.Oauth.ResourceOwners
 
-  @impl Boruta.Oauth.ResourceOwners
-  def get_by(_params),
-    do: {:error, "Markdow does not authenticate resource owners through OAuth."}
+  import Ecto.Query
 
-  @impl Boruta.Oauth.ResourceOwners
-  def check_password(_resource_owner, _password),
-    do: {:error, "Markdow does not authenticate resource owners through OAuth."}
+  alias Boruta.Ecto.Scope
+  alias Boruta.Oauth.ResourceOwner
+  alias Markdow.Accounts.User
+  alias Markdow.Repo
 
-  @impl Boruta.Oauth.ResourceOwners
-  def authorized_scopes(_resource_owner), do: []
+  @impl true
+  def get_by(username: username) when is_binary(username),
+    do: resource_owner(Repo.get_by(User, email: normalize_email(username)))
+
+  def get_by(sub: sub) when is_binary(sub), do: resource_owner(Repo.get(User, sub))
+  def get_by(_params), do: {:error, "Account not found."}
+
+  @impl true
+  def check_password(%ResourceOwner{}, _password),
+    do: {:error, "Markdow uses one-time email links for browser authentication."}
+
+  @impl true
+  def authorized_scopes(%ResourceOwner{}),
+    do: Repo.all(from(scope in Scope, order_by: [asc: scope.name]))
+
+  @impl true
+  def claims(%ResourceOwner{username: email}, _scope), do: %{email: email}
+
+  defp resource_owner(%User{id: id, email: email}),
+    do: {:ok, %ResourceOwner{sub: id, username: email}}
+
+  defp resource_owner(nil), do: {:error, "Account not found."}
+  defp normalize_email(email), do: email |> String.trim() |> String.downcase()
 end

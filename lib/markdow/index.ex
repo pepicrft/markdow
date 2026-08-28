@@ -914,8 +914,7 @@ defmodule Markdow.Index do
 
   defp perform_agent_auth(
          index,
-         {:confirm_claim, id, code_hashes, user_id, claimed_at, email_verified, address,
-          attempt_limit}
+         {:confirm_claim, id, user_id, claimed_at, email_verified, address, attempt_limit}
        ) do
     index.repo.transaction(fn ->
       registration =
@@ -926,7 +925,6 @@ defmodule Markdow.Index do
       case confirm_locked_claim(
              index.repo,
              registration,
-             code_hashes,
              user_id,
              claimed_at,
              email_verified,
@@ -1079,7 +1077,6 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          _repo,
          nil,
-         _code_hash,
          _user_id,
          _at,
          _email_verified,
@@ -1091,31 +1088,25 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          repo,
          %{status: "pending"} = registration,
-         code_hashes,
          user_id,
          claimed_at,
          email_verified,
          address,
-         attempt_limit
+         _attempt_limit
        ) do
-    if valid_claim_code?(registration.user_code_hash, code_hashes) do
-      claim_locked_registration(
-        repo,
-        registration,
-        user_id,
-        claimed_at,
-        email_verified,
-        address
-      )
-    else
-      reject_claim_code(repo, registration, address, attempt_limit)
-    end
+    claim_locked_registration(
+      repo,
+      registration,
+      user_id,
+      claimed_at,
+      email_verified,
+      address
+    )
   end
 
   defp confirm_locked_claim(
          _repo,
          %{status: "claimed"},
-         _code_hash,
          _user_id,
          _claimed_at,
          _email_verified,
@@ -1127,7 +1118,6 @@ defmodule Markdow.Index do
   defp confirm_locked_claim(
          _repo,
          _registration,
-         _code_hash,
          _user_id,
          _claimed_at,
          _email_verified,
@@ -1135,15 +1125,6 @@ defmodule Markdow.Index do
          _attempt_limit
        ),
        do: {:error, :expired_token}
-
-  defp valid_claim_code?(stored_hash, code_hashes) when is_list(code_hashes) do
-    Enum.reduce(code_hashes, false, fn code_hash, valid? ->
-      secure_digest_match?(stored_hash, code_hash) or valid?
-    end)
-  end
-
-  defp valid_claim_code?(stored_hash, code_hash),
-    do: secure_digest_match?(stored_hash, code_hash)
 
   defp record_locked_sign_in_failure(_repo, nil, _address, _limit),
     do: {:error, :invalid_claim_token}
@@ -1263,37 +1244,6 @@ defmodule Markdow.Index do
   defp finish_claim({:error, reason}, _repo, _registration_id, _user_id, _address),
     do: {:error, reason}
 
-  defp reject_claim_code(repo, registration, address, attempt_limit) do
-    failed_attempts = registration.failed_claim_attempts + 1
-    expired? = failed_attempts >= attempt_limit
-
-    updates =
-      if expired?,
-        do: %{failed_claim_attempts: failed_attempts, status: "expired"},
-        else: %{failed_claim_attempts: failed_attempts}
-
-    registration
-    |> Ecto.Changeset.change(updates)
-    |> repo.update()
-    |> finish_claim_rejection(repo, registration.id, address, expired?)
-  end
-
-  defp finish_claim_rejection({:error, reason}, _repo, _id, _address, _expired?),
-    do: {:error, reason}
-
-  defp finish_claim_rejection({:ok, _registration}, _repo, _id, _address, false),
-    do: {:error, :invalid_user_code}
-
-  defp finish_claim_rejection({:ok, _registration}, repo, id, address, true) do
-    case insert_agent_event(repo, id, "registration.expired", %{
-           reason: "claim_attempt_limit",
-           network_address: address
-         }) do
-      :ok -> {:error, :expired_token}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
   defp finish_sign_in_failure({:error, reason}, _repo, _id, _address, _expired?),
     do: {:error, reason}
 
@@ -1331,10 +1281,6 @@ defmodule Markdow.Index do
           insert_agent_event(repo, token.registration_id, "token.revoked", %{})
         end
     end
-  end
-
-  defp secure_digest_match?(expected, actual) do
-    byte_size(expected) == byte_size(actual) and Plug.Crypto.secure_compare(expected, actual)
   end
 
   defp find_registration(repo, attribute, value) do
@@ -1426,8 +1372,7 @@ defmodule Markdow.Index do
          :ok <-
            insert_agent_event(repo, registration.id, "claim.requested", %{
              email: registration.claim_email
-           }),
-         :ok <- insert_agent_event(repo, registration.id, "user_code.minted", %{}) do
+           }) do
       {:ok, registration}
     end
   end

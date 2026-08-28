@@ -12,7 +12,6 @@ defmodule MarkdowWeb.OAuthController do
 
   @claim_grant AgentAuth.claim_grant()
   @jwt_bearer_grant AgentAuth.jwt_bearer_grant()
-  @client_credentials_grant "client_credentials"
 
   tags ["Agent authentication"]
   security []
@@ -52,18 +51,7 @@ defmodule MarkdowWeb.OAuthController do
     )
   end
 
-  # Boruta reads the client credentials off the connection itself, from either
-  # the basic authorization header or the form body, so the request is handed
-  # over whole rather than destructured here.
-  def token(conn, %{"grant_type" => grant}) when grant == @client_credentials_grant do
-    Boruta.Oauth.token(conn, __MODULE__)
-  end
-
-  def token(conn, %{"grant_type" => _grant}) do
-    conn |> put_status(400) |> json(%{error: "unsupported_grant_type"})
-  end
-
-  def token(conn, _params), do: conn |> put_status(400) |> json(%{error: "invalid_request"})
+  def token(conn, _params), do: Boruta.Oauth.token(conn, __MODULE__)
 
   # RFC 7009 revocation is idempotent and does not tell the caller whether the
   # token existed. Both kinds are attempted because the endpoint is advertised
@@ -92,14 +80,20 @@ defmodule MarkdowWeb.OAuthController do
       [origin, origin <> "/mcp"]
     )
 
+    data =
+      %{
+        access_token: response.access_token,
+        token_type: response.token_type,
+        expires_in: response.expires_in,
+        refresh_token: response.refresh_token,
+        scope: response.token && response.token.scope
+      }
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
+
     conn
     |> no_store()
-    |> json(%{
-      access_token: response.access_token,
-      token_type: response.token_type,
-      expires_in: response.expires_in,
-      scope: response.token && response.token.scope
-    })
+    |> json(data)
   end
 
   @impl Boruta.Oauth.TokenApplication

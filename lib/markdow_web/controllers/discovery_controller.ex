@@ -2,7 +2,6 @@ defmodule MarkdowWeb.DiscoveryController do
   use MarkdowWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  alias Markdow.AgentAuth
   alias Markdow.OAuth
   alias MarkdowWeb.PublicOrigin
   alias OpenApiSpex.Schema
@@ -22,12 +21,12 @@ defmodule MarkdowWeb.DiscoveryController do
 
   operation :authorization_server,
     operation_id: "get_oauth_authorization_server",
-    summary: "Discover auth.md registration and token endpoints",
+    summary: "Discover OAuth authorization endpoints",
     responses: [ok: {"Authorization server metadata", "application/json", %Schema{type: :object}}]
 
   operation :jwks,
     operation_id: "get_agent_auth_signing_keys",
-    summary: "Read public keys for service identity assertions",
+    summary: "Read public keys for legacy service identity assertions",
     responses: [ok: {"Public signing keys", "application/json", %Schema{type: :object}}]
 
   operation :mcp_server_card,
@@ -53,7 +52,7 @@ defmodule MarkdowWeb.DiscoveryController do
       resource: origin <> "/mcp",
       resource_name: "Markdow Model Context Protocol server",
       authorization_servers: [origin],
-      scopes_supported: AgentAuth.scopes(),
+      scopes_supported: OAuth.scopes(),
       bearer_methods_supported: ["header"],
       resource_documentation: origin <> "/auth.md"
     })
@@ -65,39 +64,22 @@ defmodule MarkdowWeb.DiscoveryController do
     json(conn, %{
       resource: origin,
       authorization_servers: [origin],
-      scopes_supported: AgentAuth.scopes(),
+      scopes_supported: OAuth.scopes(),
       bearer_methods_supported: ["header"],
       issuer: origin,
+      authorization_endpoint: origin <> "/oauth2/authorize",
       token_endpoint: origin <> "/oauth2/token",
       revocation_endpoint: origin <> "/oauth2/revoke",
       registration_endpoint: origin <> "/oauth2/register",
-      grant_types_supported:
-        [AgentAuth.claim_grant(), AgentAuth.jwt_bearer_grant()] ++ OAuth.grant_types(),
-      # "none" covers the claim and assertion grants, which authenticate the
-      # credential rather than the client. A registered client authenticates
-      # with the secret it was issued.
-      token_endpoint_auth_methods_supported: ["none", "client_secret_basic", "client_secret_post"],
-      jwks_uri: origin <> "/.well-known/jwks.json",
-      agent_auth: %{
-        skill: origin <> "/auth.md",
-        identity_endpoint: origin <> "/agent/identity",
-        claim_endpoint: origin <> "/agent/identity/claim",
-        events_endpoint: origin <> "/agent/event/notify",
-        identity_types_supported: ["service_auth"],
-        identity_assertion: %{assertion_types_supported: []},
-        events_supported: []
-      }
+      grant_types_supported: OAuth.grant_types(),
+      response_types_supported: ["code"],
+      code_challenge_methods_supported: ["S256"],
+      token_endpoint_auth_methods_supported: ["none"]
     })
   end
 
   def jwks(conn, _params) do
-    case AgentAuth.jwks() do
-      {:ok, keys} ->
-        json(conn, keys)
-
-      {:error, _reason} ->
-        conn |> put_status(503) |> json(%{error: "signing_key_unavailable"})
-    end
+    conn |> put_status(404) |> json(%{error: "not_found"})
   end
 
   def mcp_server_card(conn, _params) do
@@ -132,7 +114,7 @@ defmodule MarkdowWeb.DiscoveryController do
       resource: origin,
       resource_name: "Markdow note interface",
       authorization_servers: [origin],
-      scopes_supported: AgentAuth.scopes(),
+      scopes_supported: OAuth.scopes(),
       bearer_methods_supported: ["header"],
       resource_documentation: origin <> "/auth.md"
     }

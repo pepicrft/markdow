@@ -124,21 +124,6 @@ agent_auth_private_key =
       value
   end
 
-agent_auth_user_code_hmac_key =
-  case {config_env(), System.get_env("MARKDOW_AGENT_AUTH_USER_CODE_HMAC_KEY")} do
-    {:prod, nil} ->
-      raise "environment variable MARKDOW_AGENT_AUTH_USER_CODE_HMAC_KEY is missing"
-
-    {:prod, value} when byte_size(value) < 32 ->
-      raise "MARKDOW_AGENT_AUTH_USER_CODE_HMAC_KEY must contain at least 32 bytes in production"
-
-    {_environment, nil} ->
-      api_key
-
-    {_environment, value} ->
-      value
-  end
-
 embedding_secret_key =
   case {config_env(), System.get_env("MARKDOW_EMBEDDING_SECRET_KEY")} do
     {:prod, nil} ->
@@ -223,7 +208,7 @@ if config_env() == :prod do
       System.get_env("MARKDOW_SECRET_KEY_BASE") ||
         raise("environment variable MARKDOW_SECRET_KEY_BASE is missing")
 
-  smtp_relay = System.get_env("MARKDOW_SMTP_RELAY", "smtp-relay.pepicrft.me")
+  smtp_relay = System.get_env("MARKDOW_SMTP_RELAY", "smtp-relay.smtp-relay.svc.cluster.local")
 
   config :markdow, Markdow.Mailer,
     adapter: Swoosh.Adapters.SMTP,
@@ -301,7 +286,6 @@ config :markdow,
     access_token_ttl_seconds: 3_600,
     poll_interval_seconds: 5,
     private_key_pem: agent_auth_private_key,
-    user_code_hmac_key: agent_auth_user_code_hmac_key,
     allow_ephemeral_signing_key:
       System.get_env(
         "MARKDOW_AGENT_AUTH_ALLOW_EPHEMERAL_KEY",
@@ -318,7 +302,10 @@ config :markdow,
 # clients discovered the authorization server at or they will refuse them.
 config :boruta, Boruta.Oauth,
   repo: Markdow.Repo,
-  contexts: [resource_owners: Markdow.OAuth.ResourceOwners],
+  contexts: [
+    clients: Markdow.OAuth.Clients,
+    resource_owners: Markdow.OAuth.ResourceOwners
+  ],
   issuer: default_public_origin,
   max_ttl: [
     authorization_code: 60,
