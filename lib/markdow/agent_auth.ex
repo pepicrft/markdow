@@ -113,8 +113,8 @@ defmodule Markdow.AgentAuth do
          :ok <-
            Index.agent_auth(
              index(opts),
-             {:confirm_claim, registration.id, user_code_digest(user_code, opts), user_id,
-              current_time, true, option(opts, :network_address, nil),
+             {:confirm_claim, registration.id, user_code_digest(user_code, registration.id, opts),
+              user_id, current_time, true, option(opts, :network_address, nil),
               option(opts, :claim_attempt_limit, 5)}
            ) do
       {:ok,
@@ -218,18 +218,19 @@ defmodule Markdow.AgentAuth do
   end
 
   defp create_registration(email, address, current_time, opts) do
+    registration_id = secret("reg_")
     claim_token = secret("clm_")
     claim_attempt_token = secret("cla_")
     user_code = user_code()
 
     registration = %{
-      id: secret("reg_"),
+      id: registration_id,
       registration_type: "service_auth",
       status: "pending",
       claim_email: email,
       claim_token_hash: digest(claim_token),
       claim_attempt_token_hash: digest(claim_attempt_token),
-      user_code_hash: user_code_digest(user_code, opts),
+      user_code_hash: user_code_digest(user_code, registration_id, opts),
       created_at: current_time,
       expires_at: current_time + option(opts, :registration_ttl_seconds, 86_400),
       claim_attempt_expires_at: current_time + option(opts, :claim_attempt_ttl_seconds, 600),
@@ -542,7 +543,7 @@ defmodule Markdow.AgentAuth do
   defp option(opts, key, default), do: Keyword.get(opts, key, Keyword.get(config(), key, default))
   defp digest(value), do: :crypto.hash(:sha256, value)
 
-  defp user_code_digest(code, opts) do
+  defp user_code_digest(code, registration_id, opts) do
     key =
       option(
         opts,
@@ -550,7 +551,12 @@ defmodule Markdow.AgentAuth do
         Keyword.get(opts, :api_key) || Application.fetch_env!(:markdow, :api_key)
       )
 
-    :crypto.mac(:hmac, :sha256, key, "markdow:agent-user-code:v1:" <> normalize_user_code(code))
+    :crypto.mac(
+      :hmac,
+      :sha256,
+      key,
+      "markdow:agent-user-code:v2:" <> registration_id <> ":" <> normalize_user_code(code)
+    )
   end
 
   defp secret(prefix),
