@@ -97,7 +97,7 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
 
   @impl true
   def preauthorize_success(conn, %AuthorizationSuccess{} = response) do
-    send_page(conn, 200, consent_page(response, conn.params))
+    send_page(conn, 200, consent_page(response, conn.params), response.redirect_uri)
   end
 
   @impl true
@@ -220,17 +220,34 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
     do:
       ~s(<input type="hidden" name="_csrf_token" value="#{Plug.CSRFProtection.get_csrf_token()}">)
 
-  defp send_page(conn, status, body) do
+  defp send_page(conn, status, body, redirect_uri \\ nil) do
     conn
     |> put_resp_content_type("text/html", "utf-8")
     |> put_resp_header("cache-control", "no-store")
     |> put_resp_header("referrer-policy", "no-referrer")
     |> put_resp_header(
       "content-security-policy",
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+      content_security_policy(redirect_uri)
     )
     |> send_resp(status, body)
   end
+
+  defp content_security_policy(redirect_uri) do
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'#{redirect_origin(redirect_uri)}; base-uri 'none'; frame-ancestors 'none'"
+  end
+
+  defp redirect_origin(redirect_uri) when is_binary(redirect_uri) do
+    case URI.parse(redirect_uri) do
+      %URI{scheme: scheme, host: host, port: port}
+      when scheme in ["http", "https"] and is_binary(host) ->
+        " " <> URI.to_string(%URI{scheme: scheme, host: host, port: port})
+
+      _invalid_uri ->
+        ""
+    end
+  end
+
+  defp redirect_origin(_redirect_uri), do: ""
 
   defp escape(value) do
     value
