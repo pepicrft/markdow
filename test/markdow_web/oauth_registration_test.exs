@@ -83,6 +83,10 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
     assert consent.resp_body =~
              ~s(<form method="post" action="/oauth2/authorize/deny" data-part="deny">)
 
+    assert Plug.Conn.get_resp_header(consent, "content-security-policy") == [
+             "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://client.example; base-uri 'none'; frame-ancestors 'none'"
+           ]
+
     plain_proof_request =
       DataCase.browser_conn(
         :get,
