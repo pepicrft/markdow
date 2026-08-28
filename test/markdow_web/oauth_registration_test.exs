@@ -77,6 +77,11 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
     assert consent.status == 200
     assert consent.resp_body =~ "Confirm access"
     assert consent.resp_body =~ "documents:read"
+    assert consent.resp_body =~ ~s(<div data-part="authorization-actions">)
+    assert consent.resp_body =~ ~s(<form method="post" action="/oauth2/authorize">)
+
+    assert consent.resp_body =~
+             ~s(<form method="post" action="/oauth2/authorize/deny" data-part="deny">)
 
     plain_proof_request =
       DataCase.browser_conn(
