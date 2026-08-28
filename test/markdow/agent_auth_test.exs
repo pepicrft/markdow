@@ -98,6 +98,12 @@ defmodule Markdow.AgentAuthTest do
                Keyword.put(opts, :resource, @issuer <> "/mcp")
              )
 
+    assert AgentAuth.exchange_assertion(
+             token_response.identity_assertion,
+             @issuer <> "/mcp",
+             opts
+           ) == {:error, :invalid_grant}
+
     assert :ok = AgentAuth.revoke_access_token(token_response.access_token, opts)
     assert :ok = AgentAuth.revoke_access_token(token_response.access_token, opts)
 
@@ -123,6 +129,23 @@ defmodule Markdow.AgentAuthTest do
              "token.issued",
              "token.revoked"
            ]
+  end
+
+  test "keeps pending claim codes valid when the application key rotates", %{index: index} do
+    user = create_user(index, @email)
+    opts = Keyword.put(auth_opts(index), :user_code_hmac_key, "dedicated-user-code-key")
+
+    assert {:ok, registration} = AgentAuth.create_service_registration(@email, opts)
+
+    rotated_key_opts = Keyword.put(opts, :api_key, "rotated-application-key")
+
+    assert {:ok, _claimed} =
+             AgentAuth.confirm_claim(
+               registration.claim_attempt_token,
+               registration.user_code,
+               user,
+               rotated_key_opts
+             )
   end
 
   test "rejects an authenticated account whose email differs from the login hint", %{index: index} do
@@ -380,6 +403,7 @@ defmodule Markdow.AgentAuthTest do
       index: index,
       issuer: @issuer,
       api_key: @api_key,
+      user_code_hmac_key: "dedicated-user-code-key",
       allow_ephemeral_signing_key: true
     ]
   end

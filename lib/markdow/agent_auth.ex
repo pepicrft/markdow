@@ -160,6 +160,7 @@ defmodule Markdow.AgentAuth do
          true <- registration.claimed_by_user_id == claims["user_id"],
          true <- registration.email_verified,
          true <- claims["email_verified"] == true,
+         :ok <- consume_assertion(claims, opts),
          {:ok, token} <-
            issue_access_token(registration, normalized_resource(resource, opts), opts) do
       {:ok, token_response(token, opts)}
@@ -416,8 +417,15 @@ defmodule Markdow.AgentAuth do
 
   defp valid_assertion_subject?(claims) do
     is_binary(claims["sub"]) and is_binary(claims["user_id"]) and
-      is_binary(claims["email"])
+      is_binary(claims["email"]) and is_binary(claims["jti"])
   end
+
+  defp consume_assertion(%{"jti" => jti, "exp" => expires_at}, opts)
+       when is_binary(jti) and is_integer(expires_at) do
+    Index.agent_auth(index(opts), {:consume_assertion, digest(jti), expires_at, now(opts)})
+  end
+
+  defp consume_assertion(_claims, _opts), do: {:error, :invalid_grant}
 
   defp signing_key(opts) do
     cond do
@@ -536,8 +544,11 @@ defmodule Markdow.AgentAuth do
 
   defp user_code_digest(code, opts) do
     key =
-      Keyword.get(opts, :user_code_hmac_key) || Keyword.get(opts, :api_key) ||
-        Application.fetch_env!(:markdow, :api_key)
+      option(
+        opts,
+        :user_code_hmac_key,
+        Keyword.get(opts, :api_key) || Application.fetch_env!(:markdow, :api_key)
+      )
 
     :crypto.mac(:hmac, :sha256, key, "markdow:agent-user-code:v1:" <> normalize_user_code(code))
   end

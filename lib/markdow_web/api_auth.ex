@@ -13,6 +13,7 @@ defmodule MarkdowWeb.ApiAuth do
 
   @spec call(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def call(conn, opts) do
+    conn = no_store(conn)
     required_scopes = Keyword.get(opts, :scopes, [])
 
     with {:ok, token} <- credential(conn),
@@ -77,5 +78,13 @@ defmodule MarkdowWeb.ApiAuth do
     |> put_resp_content_type("application/json")
     |> send_resp(401, JSON.encode!(%{error: error}))
     |> halt()
+  end
+
+  # Protected responses can contain vault contents, credentials, or account
+  # metadata. Prevent both browser and intermediary caches from retaining them.
+  defp no_store(conn) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> put_resp_header("pragma", "no-cache")
   end
 end

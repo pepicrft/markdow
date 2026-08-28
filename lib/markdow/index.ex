@@ -11,6 +11,7 @@ defmodule Markdow.Index do
   alias Ecto.Adapters.SQL
   alias Markdow.Accounts
   alias Markdow.AgentAuth.AccessToken
+  alias Markdow.AgentAuth.Assertion
   alias Markdow.AgentAuth.Event
   alias Markdow.AgentAuth.Registration
   alias Markdow.Index.Context
@@ -978,6 +979,25 @@ defmodule Markdow.Index do
         insert_agent_event(index.repo, token.registration_id, "token.issued", %{
           scope: token.scopes
         })
+      end
+    end)
+  end
+
+  defp perform_agent_auth(index, {:consume_assertion, hash, expires_at, current_time}) do
+    transaction(index.repo, fn ->
+      index.repo.delete_all(
+        from(assertion in Assertion, where: assertion.expires_at <= ^current_time)
+      )
+
+      timestamp = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      case index.repo.insert_all(
+             Assertion,
+             [%{jti_hash: hash, expires_at: expires_at, inserted_at: timestamp}],
+             on_conflict: :nothing
+           ) do
+        {1, _records} -> :ok
+        {0, _records} -> {:error, :assertion_replayed}
       end
     end)
   end
