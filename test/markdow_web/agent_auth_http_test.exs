@@ -21,7 +21,14 @@ defmodule MarkdowWeb.AgentAuthHttpTest do
       |> json()
 
     assert metadata["authorization_endpoint"] == origin <> "/oauth2/authorize"
-    assert metadata["grant_types_supported"] == ["authorization_code", "refresh_token"]
+
+    assert metadata["grant_types_supported"] == [
+             "urn:workos:agent-auth:grant-type:claim",
+             "urn:ietf:params:oauth:grant-type:jwt-bearer",
+             "authorization_code",
+             "refresh_token"
+           ]
+
     assert metadata["code_challenge_methods_supported"] == ["S256"]
     assert metadata["token_endpoint_auth_methods_supported"] == ["none"]
   end

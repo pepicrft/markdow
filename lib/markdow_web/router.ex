@@ -139,6 +139,7 @@ defmodule MarkdowWeb.Router do
     get "/accounts/log-in/:token", AccountSessionController, :confirm
     get "/oauth2/authorize", OAuthAuthorizeController, :authorize
     post "/oauth2/authorize", OAuthAuthorizeController, :approve
+    post "/oauth2/authorize/deny", OAuthAuthorizeController, :deny
     get "/agent/identity/claim", ClaimController, :show
     post "/agent/identity/claim/resend-email-link", ClaimController, :resend
     post "/agent/identity/claim/confirm", ClaimController, :confirm

@@ -98,6 +98,12 @@ defmodule MarkdowWeb.OAuthRegistrationTest do
     assert plain_proof_request.status == 400
     assert plain_proof_request.resp_body =~ "S256 proof-key challenge is required"
 
+    denied = DataCase.browser_conn(:post, "/oauth2/authorize/deny", query, index)
+    assert denied.status == 302
+    denied_location = denied |> Plug.Conn.get_resp_header("location") |> List.first()
+    assert denied_location =~ "error=access_denied"
+    assert denied_location =~ "state=client-state"
+
     approval =
       DataCase.browser_conn(
         :post,

@@ -16,13 +16,24 @@ defmodule MarkdowWeb.ApiAuth do
     conn = no_store(conn)
     required_scopes = Keyword.get(opts, :scopes, [])
 
-    with {:ok, token} <- credential(conn),
-         {:ok, authorization} <- authorize(conn, token, required_scopes) do
-      assign(conn, :authorization, authorization)
-    else
+    case credential(conn) do
+      {:ok, token} -> authenticate(conn, token, required_scopes)
+      {:error, :missing_token} -> maybe_anonymous(conn, opts, required_scopes)
+    end
+  end
+
+  defp authenticate(conn, token, required_scopes) do
+    case authorize(conn, token, required_scopes) do
+      {:ok, authorization} -> assign(conn, :authorization, authorization)
       {:error, :insufficient_scope} -> unauthorized(conn, "insufficient_scope", required_scopes)
       _error -> unauthorized(conn, "invalid_token", required_scopes)
     end
+  end
+
+  defp maybe_anonymous(conn, opts, required_scopes) do
+    if Keyword.get(opts, :optional, false),
+      do: conn,
+      else: unauthorized(conn, "invalid_token", required_scopes)
   end
 
   # Email-confirmed agent access and user-authorized OAuth access both resolve

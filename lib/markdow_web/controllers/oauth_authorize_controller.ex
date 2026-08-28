@@ -6,7 +6,8 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
   use MarkdowWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  alias Boruta.Oauth.{AuthorizationSuccess, AuthorizeResponse, Error, ResourceOwner}
+  alias Boruta.ClientsAdapter
+  alias Boruta.Oauth.{AuthorizationSuccess, AuthorizeResponse, Client, Error, ResourceOwner}
   alias MarkdowWeb.UserAuth
   alias OpenApiSpex.Schema
 
@@ -29,6 +30,14 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
       {"Authorization approval", "application/x-www-form-urlencoded",
        %Schema{type: :object, additionalProperties: true}},
     responses: [found: {"Authorization result", "text/html", %Schema{type: :string}}]
+
+  operation :deny,
+    operation_id: "deny_oauth_client",
+    summary: "Deny an OAuth client authorization request",
+    request_body:
+      {"Authorization denial", "application/x-www-form-urlencoded",
+       %Schema{type: :object, additionalProperties: true}},
+    responses: [found: {"Authorization denial", "text/html", %Schema{type: :string}}]
 
   def authorize(%{assigns: %{current_user: %{id: id, email: email}}} = conn, params) do
     case validate_request(params) do
@@ -63,6 +72,28 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
 
   def approve(conn, _params),
     do: invalid_request(conn, "The authorization request was not approved.")
+
+  def deny(conn, params) do
+    with :ok <- validate_request(params),
+         %Client{} = client <- ClientsAdapter.get_client(params["client_id"]),
+         redirect_uri when is_binary(redirect_uri) and redirect_uri != "" <-
+           params["redirect_uri"],
+         :ok <- Client.check_redirect_uri(client, redirect_uri) do
+      redirect(
+        conn,
+        external:
+          redirect_uri <>
+            if(String.contains?(redirect_uri, "?"), do: "&", else: "?") <>
+            URI.encode_query(%{
+              "error" => "access_denied",
+              "error_description" => "The account holder did not approve this request.",
+              "state" => params["state"] || ""
+            })
+      )
+    else
+      _error -> invalid_request(conn, "The authorization request is invalid.")
+    end
+  end
 
   @impl true
   def preauthorize_success(conn, %AuthorizationSuccess{} = response) do
@@ -158,6 +189,11 @@ defmodule MarkdowWeb.OAuthAuthorizeController do
             #{fields}
             <input type="hidden" name="consent" value="approve">
             <button type="submit">Allow access</button>
+          </form>
+          <form method="post" action="/oauth2/authorize/deny">
+            #{csrf_field()}
+            #{fields}
+            <button type="submit">Do not allow access</button>
           </form>
         </main>
       </body>

@@ -48,6 +48,7 @@ defmodule MarkdowWeb.OpenApiTest do
       "consume_email_login",
       "authorize_oauth_client",
       "approve_oauth_client",
+      "deny_oauth_client",
       "show_agent_claim",
       "resend_agent_claim_email_link",
       "confirm_agent_claim",
